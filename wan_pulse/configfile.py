@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .config import CaptureConfig, ClassifyConfig, HistoryConfig, NotifyConfig
+from .config import CaptureConfig, ClassifyConfig, HistoryConfig, NotifyConfig, WebConfig
 
 try:  # Python 3.11+
     import tomllib as _toml
@@ -36,6 +36,7 @@ DEFAULT_CONFIG_NAME = "wan-pulse.toml"
 CLASSIFY_TABLE = "classify"
 NOTIFY_TABLE = "notify"
 HISTORY_TABLE = "history"
+WEB_TABLE = "web"
 
 _CLASSIFY_COMMENTS: dict[str, str] = {
     "enabled": "true で保存区間を推論(犬か/発声タイプ)。要 .[infer] とモデル",
@@ -65,6 +66,12 @@ _HISTORY_COMMENTS: dict[str, str] = {
     "webhook_env": "backend='gsheet' のとき Apps Script Web App URL を入れる環境変数名",
     "webhook_url": "Apps Script URL を直接書く場合ここに(env より優先/秘密・run ログでは伏字)",
     "only_dog": "true で犬と判定された区間だけ記録(既定は全部)",
+}
+
+_WEB_COMMENTS: dict[str, str] = {
+    "enabled": "true で run と同時にローカル管理用ウェブアプリを起動",
+    "host": "バインド先。127.0.0.1=ローカルのみ(安全)。LAN公開は 0.0.0.0",
+    "port": "ウェブアプリのポート",
 }
 
 # Per-field inline comments used when rendering the template / run log.
@@ -125,8 +132,9 @@ def render_toml(
     classify: ClassifyConfig | None = None,
     notify: NotifyConfig | None = None,
     history: HistoryConfig | None = None,
+    web: WebConfig | None = None,
 ) -> str:
-    """Render a CaptureConfig (+ optional [classify]/[notify]/[history]) as TOML."""
+    """Render a CaptureConfig (+ optional sub-tables) as TOML."""
     lines: list[str] = []
     for line in header_lines or []:
         lines.append(f"# {line}")
@@ -139,6 +147,7 @@ def render_toml(
         (CLASSIFY_TABLE, classify, _CLASSIFY_COMMENTS),
         (NOTIFY_TABLE, notify, _NOTIFY_COMMENTS),
         (HISTORY_TABLE, history, _HISTORY_COMMENTS),
+        (WEB_TABLE, web, _WEB_COMMENTS),
     ):
         if cfg is not None:
             lines.append("")
@@ -158,7 +167,8 @@ def template_toml() -> str:
     ]
     return render_toml(
         config, header_lines=header,
-        classify=ClassifyConfig(), notify=NotifyConfig(), history=HistoryConfig(),
+        classify=ClassifyConfig(), notify=NotifyConfig(),
+        history=HistoryConfig(), web=WebConfig(),
     )
 
 
@@ -186,7 +196,7 @@ def load_file_values(path: Path | None) -> dict[str, Any]:
     """
     data = _read_toml(path)
     valid = {f.name for f in dataclasses.fields(CaptureConfig)}
-    unknown = set(data) - valid - {CLASSIFY_TABLE, NOTIFY_TABLE, HISTORY_TABLE}
+    unknown = set(data) - valid - {CLASSIFY_TABLE, NOTIFY_TABLE, HISTORY_TABLE, WEB_TABLE}
     if unknown:
         raise ValueError(f"unknown config keys in {path}: {', '.join(sorted(unknown))}")
     return {k: v for k, v in data.items() if k in valid}
@@ -216,6 +226,11 @@ def load_notify_values(path: Path | None) -> dict[str, Any]:
 def load_history_values(path: Path | None) -> dict[str, Any]:
     """Read the [history] table from a TOML file (empty dict if absent)."""
     return _load_table(path, HISTORY_TABLE, HistoryConfig)
+
+
+def load_web_values(path: Path | None) -> dict[str, Any]:
+    """Read the [web] table from a TOML file (empty dict if absent)."""
+    return _load_table(path, WEB_TABLE, WebConfig)
 
 
 def resolve_config(
@@ -254,12 +269,22 @@ def resolve_history(
     return dataclasses.replace(base, **applied) if applied else base
 
 
+def resolve_web(
+    file_values: dict[str, Any], cli_overrides: dict[str, Any]
+) -> WebConfig:
+    """Same precedence as resolve_config, for the web-app settings."""
+    base = WebConfig(**file_values)
+    applied = {k: v for k, v in cli_overrides.items() if v is not None}
+    return dataclasses.replace(base, **applied) if applied else base
+
+
 def write_run_log(
     config: CaptureConfig,
     *,
     classify: ClassifyConfig | None = None,
     notify: NotifyConfig | None = None,
     history: HistoryConfig | None = None,
+    web: WebConfig | None = None,
     when: _dt.datetime | None = None,
 ) -> Path:
     """Drop a TOML snapshot of the effective config under the output dir."""
@@ -275,7 +300,7 @@ def write_run_log(
     path.write_text(
         render_toml(
             config, header_lines=header,
-            classify=classify, notify=notify, history=history,
+            classify=classify, notify=notify, history=history, web=web,
         ),
         encoding="utf-8",
     )

@@ -189,4 +189,23 @@ class HistoryConfig:
             raise ValueError("history backend must be 'gsheet' or 'csv'")
 
 
+@dataclass
+class WebConfig:
+    """Settings for the local web app (browse/play/label recorded segments)."""
+
+    enabled: bool = False
+    """Start the web app alongside `wan-pulse run`."""
+
+    host: str = "127.0.0.1"
+    """Bind address. 127.0.0.1 = local only (safe). Use 0.0.0.0 to expose on LAN."""
+
+    port: int = 8765
+    """TCP port for the web app."""
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.port <= 65535:
+            raise ValueError("port must be in 1..65535")
+
+
+
 

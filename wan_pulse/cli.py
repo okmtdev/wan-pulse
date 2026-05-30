@@ -5,6 +5,7 @@ Subcommands:
   devices  list available audio input/output devices
   monitor  print live RMS levels (use this to calibrate threshold_db)
   run      capture, skip silence, and save bark segments to .wav
+  web      run the local web app to browse / play / label recordings
 
 Settings come from a TOML file (default: ./wan-pulse.toml) and any CLI flag
 overrides it. Precedence: built-in defaults < TOML file < CLI flags.
@@ -24,7 +25,7 @@ from .logsetup import DEFAULT_LOG_FILE, get_logger, setup_logging
 log = get_logger()
 
 # Commands whose "processing" should be written to the log file.
-_FILE_LOG_COMMANDS = {"run", "monitor", "classify"}
+_FILE_LOG_COMMANDS = {"run", "monitor", "classify", "web"}
 
 
 def _add_log_args(p: argparse.ArgumentParser) -> None:
@@ -135,6 +136,18 @@ def _build_recorder(history_config):
         return None
 
 
+def _resolve_web(args: argparse.Namespace):
+    """Build the WebConfig: defaults < [web] table < CLI flags."""
+    config_path = configfile.find_config(getattr(args, "config", None))
+    file_values = configfile.load_web_values(config_path)
+    overrides = {
+        "enabled": getattr(args, "web", None),
+        "host": getattr(args, "web_host", None),
+        "port": getattr(args, "web_port", None),
+    }
+    return configfile.resolve_web(file_values, overrides)
+
+
 def _build_classifier(classify_config):
     """Instantiate the classifier, with a friendly error on missing deps/model."""
     from .classify import load_classifier
@@ -216,6 +229,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         else:
             recorder = _build_recorder(history_config)
 
+    web_config = _resolve_web(args)
+
     Capture(
         config,
         classifier=classifier,
@@ -224,7 +239,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         notify_config=notify_config,
         recorder=recorder,
         history_config=history_config,
+        web_config=web_config,
     ).run()
+    return 0
+
+
+def cmd_web(args: argparse.Namespace) -> int:
+    """Run the local web app standalone (browse/play/label recordings)."""
+    from .web import run_web
+
+    config = _resolve(args)
+    web_config = _resolve_web(args)
+    run_web(config.output_dir, web_config.host, web_config.port)
     return 0
 
 
@@ -294,6 +320,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="upload the .wav too (needs a Slack bot token + channel)")
     p_run.add_argument("--history", action=argparse.BooleanOptionalAction, default=None,
                        help="log each detection to the history sheet/CSV (--no-history to disable)")
+    p_run.add_argument("--web", action=argparse.BooleanOptionalAction, default=None,
+                       help="also start the local web app (--no-web to disable)")
+    p_run.add_argument("--web-port", dest="web_port", type=int, default=None,
+                       help="port for the web app")
     _add_classify_args(p_run)
     _add_log_args(p_run)
     p_run.set_defaults(func=cmd_run)
@@ -306,6 +336,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_classify_args(p_cls)
     _add_log_args(p_cls)
     p_cls.set_defaults(func=cmd_classify)
+
+    p_web = sub.add_parser("web", help="run the local web app to browse/label recordings")
+    p_web.add_argument("--config", default=None, help="path to TOML config")
+    p_web.add_argument("--output-dir", dest="output_dir", default=None,
+                       help="recordings directory to browse")
+    p_web.add_argument("--web-host", dest="web_host", default=None, help="bind address")
+    p_web.add_argument("--web-port", dest="web_port", type=int, default=None, help="port")
+    _add_log_args(p_web)
+    p_web.set_defaults(func=cmd_web)
 
     return parser
 

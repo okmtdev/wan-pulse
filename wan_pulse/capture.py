@@ -38,6 +38,7 @@ class Capture:
         notify_config=None,
         recorder: HistoryRecorder | None = None,
         history_config=None,
+        web_config=None,
         record: bool = True,
         on_segment: Callable[[Segment], None] | None = None,
         on_block: Callable[[float], None] | None = None,
@@ -51,6 +52,7 @@ class Capture:
         self._notify_config = notify_config
         self._recorder = recorder
         self._history_config = history_config
+        self._web_config = web_config
         self._record = record
         self._on_segment = on_segment
         self._on_block = on_block
@@ -112,8 +114,14 @@ class Capture:
                 classify=self._classify_config,
                 notify=self._notify_config,
                 history=self._history_config,
+                web=self._web_config,
             )
             log.info("[wan-pulse] run settings -> %s", log_path)
+
+            if self._web_config is not None and getattr(self._web_config, "enabled", False):
+                from .web import serve_in_background
+
+                serve_in_background(cfg.output_dir, self._web_config.host, self._web_config.port)
 
         self._start_classifier()
         stream = sd.InputStream(
