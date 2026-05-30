@@ -43,6 +43,11 @@ class Capture:
         self._on_segment = on_segment
         self._on_block = on_block
         self._queue: "queue.Queue[np.ndarray]" = queue.Queue()
+        # Inference runs on its own thread so heavy ML work never blocks the
+        # realtime audio path. Segments are written/announced immediately and
+        # classified asynchronously.
+        self._classify_jobs: "queue.Queue" = queue.Queue()
+        self._classify_thread: threading.Thread | None = None
         self._stop = threading.Event()
 
     # The sounddevice callback. Keep it minimal: copy + enqueue only.
@@ -72,6 +77,7 @@ class Capture:
             log_path = write_run_log(cfg, classify=self._classify_config)
             print(f"[wan-pulse] run settings -> {log_path}")
 
+        self._start_classifier()
         stream = sd.InputStream(
             samplerate=cfg.samplerate,
             blocksize=cfg.blocksize,
@@ -87,6 +93,7 @@ class Capture:
             print("\n[wan-pulse] stopping...")
         finally:
             self._drain_and_flush()
+            self._shutdown_classifier()
 
     def _consume_loop(self) -> None:
         while not self._stop.is_set():
@@ -115,25 +122,45 @@ class Capture:
     def _emit(self, segment: Segment | None) -> None:
         if segment is None:
             return
+        # Save and announce *first* so recording never waits on inference.
         path = self.writer.write(segment)
-        line = (
+        print(
             f"[wan-pulse] saved {path.name}  "
             f"({segment.duration_sec:.2f}s, peak {segment.peak_dbfs:.1f} dBFS)"
         )
-        if self._classifier is not None:
-            label = self._classify_segment(segment, path)
-            if label:
-                line += f"  -> {label}"
-        print(line)
         if self._on_segment is not None:
             self._on_segment(segment)
+        # Hand inference off to the background worker (no-op if no classifier).
+        if self._classifier is not None:
+            self._classify_jobs.put((segment, path))
 
-    def _classify_segment(self, segment: Segment, wav_path) -> str:
+    # --- background inference -------------------------------------------------
+
+    def _start_classifier(self) -> None:
+        if self._classifier is None or self._classify_thread is not None:
+            return
+        self._classify_thread = threading.Thread(
+            target=self._classify_worker, name="wan-pulse-classify", daemon=True
+        )
+        self._classify_thread.start()
+
+    def _classify_worker(self) -> None:
+        while True:
+            job = self._classify_jobs.get()
+            try:
+                if job is None:  # sentinel -> drain done, exit
+                    return
+                segment, path = job
+                self._classify_one(segment, path)
+            finally:
+                self._classify_jobs.task_done()
+
+    def _classify_one(self, segment: Segment, wav_path) -> str:
         """Run inference and drop a JSON sidecar. Never let it break capture."""
         try:
             result = self._classifier.classify(segment.audio, segment.samplerate)
         except Exception as exc:  # noqa: BLE001 - keep recording even if inference fails
-            print(f"[wan-pulse] classify failed: {exc}", file=sys.stderr)
+            print(f"[wan-pulse] classify failed for {wav_path.name}: {exc}", file=sys.stderr)
             return ""
         payload = {
             "file": wav_path.name,
@@ -142,7 +169,18 @@ class Capture:
             **result.to_dict(),
         }
         self.writer.write_sidecar(wav_path, payload)
+        print(f"[wan-pulse] classified {wav_path.name}  -> {result.summary()}")
         return result.summary()
+
+    def _shutdown_classifier(self) -> None:
+        if self._classify_thread is None:
+            return
+        pending = self._classify_jobs.qsize()
+        if pending:
+            print(f"[wan-pulse] finishing {pending} pending classification(s)...")
+        self._classify_jobs.put(None)  # sentinel after the backlog
+        self._classify_thread.join(timeout=30)
+        self._classify_thread = None
 
     def stop(self) -> None:
         self._stop.set()

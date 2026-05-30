@@ -97,12 +97,32 @@ def test_capture_writes_sidecar_when_classifying(tmp_path):
         start_time=1_700_000_000.0,
         peak_dbfs=-12.0,
     )
-    cap._emit(seg)
 
+    # The wav is written synchronously; classification runs on a worker thread.
+    cap._start_classifier()
+    cap._emit(seg)
     wavs = list(tmp_path.rglob("*.wav"))
+    assert len(wavs) == 1  # saved immediately, not gated on inference
+
+    cap._classify_jobs.join()  # wait for the async classification to finish
+    cap._shutdown_classifier()
+
     sidecars = list(tmp_path.rglob("*.json"))
-    assert len(wavs) == 1 and len(sidecars) == 1
+    assert len(sidecars) == 1
     data = json.loads(sidecars[0].read_text())
     assert data["is_dog"] is True
     assert data["top_label"] == "Bark"
     assert data["peak_dbfs"] == -12.0
+
+
+def test_capture_without_classifier_still_saves(tmp_path):
+    from wan_pulse.capture import Capture
+    from wan_pulse.config import CaptureConfig
+    from wan_pulse.gate import Segment
+
+    cap = Capture(CaptureConfig(output_dir=str(tmp_path)))  # no classifier
+    cap._emit(
+        Segment(np.zeros(8_000, dtype=np.float32), 16_000, 1, 1_700_000_000.0, -20.0)
+    )
+    assert len(list(tmp_path.rglob("*.wav"))) == 1
+    assert list(tmp_path.rglob("*.json")) == []

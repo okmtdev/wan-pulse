@@ -291,9 +291,13 @@ pip install -e ".[infer]"
 wan-pulse run --classify
 ```
 
+推論は**バックグラウンドのワーカースレッド**で走り、録音（保存）は推論を待たずに
+即座に行われます（重い推論がリアルタイム経路を止めない設計）。保存と推論で行が分かれます:
+
 ```
 [wan-pulse] classifying each segment (ai_edge_litert.interpreter)
-[wan-pulse] saved bark_20260530_171500_999_peak-12.3dBFS.wav  (1.56s, peak -12.3 dBFS)  -> Bark 0.82 [dog:Bark 0.82]
+[wan-pulse] saved bark_20260530_171500_999_peak-12.3dBFS.wav  (1.56s, peak -12.3 dBFS)
+[wan-pulse] classified bark_20260530_171500_999_peak-12.3dBFS.wav  -> Bark 0.82 [dog:Bark 0.82]
 ```
 
 `.wav` の隣に同名の `.json`（サイドカー）が出ます:
