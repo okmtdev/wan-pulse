@@ -27,12 +27,13 @@
 
 | ファイル | 役割 |
 | --- | --- |
-| `wan_pulse/config.py` | サンプルレート・閾値・マージン等の設定（チューニングはここ） |
+| `wan_pulse/config.py` | サンプルレート・閾値・マージン等の設定（既定値の定義） |
+| `wan_pulse/configfile.py` | `wan-pulse.toml` の読み込み・優先順位のマージ・run ログ出力 |
 | `wan_pulse/ring_buffer.py` | 直近の音声を保持するリングバッファ（前マージン用の先読み） |
 | `wan_pulse/gate.py` | エネルギーゲート（無音→鳴った→無音 を区間として切り出す状態機械） |
-| `wan_pulse/writer.py` | 区間を日付フォルダ配下の `.wav` に保存 |
+| `wan_pulse/writer.py` | 区間を日付フォルダ配下の `.wav` に保存（ファイル名に peak dBFS） |
 | `wan_pulse/capture.py` | sounddevice ストリーム → ゲート → 保存 を繋ぐ実行ループ |
-| `wan_pulse/cli.py` | `devices` / `monitor` / `run` の各コマンド |
+| `wan_pulse/cli.py` | `init` / `devices` / `monitor` / `run` の各コマンド |
 | `tests/` | マイク不要のロジックテスト（合成波形で検証） |
 
 音声処理（`gate.py` / `ring_buffer.py`）は **音声 I/O から完全に分離**してあります。
@@ -104,6 +105,22 @@ M-305 のような USB マイクは挿すだけで認識されることがほと
 
 インストール後は `wan-pulse` コマンド、または `python -m wan_pulse` で実行できます。
 
+### 0. 設定ファイルを作る
+
+チューニング値は毎回フラグを打ち直さなくても、**TOML 設定ファイル**で管理できます。
+
+```bash
+wan-pulse init        # ./wan-pulse.toml を生成（コメント付き）
+```
+
+生成される `wan-pulse.toml` を編集して保存すれば、次回 `run` から反映されます。
+設定の優先順位は **組み込み既定値 ＜ wan-pulse.toml ＜ CLI フラグ**。
+つまり普段はファイルで管理し、その場限りの上書きだけフラグで渡せます。
+
+> 初期テンプレートは `threshold_db` を **低め（-60）** にしてあります。
+> これは**「鳴いたのに保存されない」を防ぐため**で、まず広めに全部録ってから、
+> 保存ファイルの `peak`（後述）を見て閾値を上げていく、という流れを想定しています。
+
 ### 1. デバイスを確認する
 
 接続されているマイクの一覧と、デフォルト入力デバイスを表示します。
@@ -112,17 +129,50 @@ M-305 のような USB マイクは挿すだけで認識されることがほと
 wan-pulse devices
 ```
 
-M-305 の行に出ている**番号**または**名前の一部**を、後述の `--device` に指定できます。
+M-305 の行に出ている**番号**または**名前の一部**を、`wan-pulse.toml` の `device`
+（または `--device`）に指定できます。
 
-```bash
-wan-pulse run --device 2
-wan-pulse run --device "M-305"
+```toml
+# wan-pulse.toml
+device = "M-305"
 ```
 
-### 2. 閾値を合わせる（キャリブレーション）
+### 2. まず低い閾値で録ってみる（チューニングの起点）
 
-部屋の暗騒音とマイクによって適切な閾値（`--threshold-db`, dBFS）は変わります。
-`monitor` でリアルタイムの音量を見ながら調整してください。
+`init` 直後はそのまま起動して構いません。閾値が低いので、ちょっとした物音まで
+拾って保存されます。**保存し過ぎでも OK** ── 次のステップで絞り込みます。
+
+```bash
+wan-pulse run
+```
+
+音が閾値を超えると録音区間が始まり、`post_margin` 秒ぶん静かになると区間が閉じて、
+次の名前で保存されます（**ファイル名にピーク音量 `peak…dBFS` が入る**のがポイント）。
+
+```
+recordings/2026-05-30/bark_20260530_071530_812_peak-11.3dBFS.wav
+```
+
+```
+[wan-pulse] config: wan-pulse.toml
+[wan-pulse] listening: 16000 Hz, 1 ch, block 30 ms, threshold -60.0 dBFS
+[wan-pulse] saving segments under ./recordings/  (Ctrl+C to stop)
+[wan-pulse] run settings -> recordings/run_20260530_071500.toml
+[wan-pulse] saved bark_20260530_071530_812_peak-11.3dBFS.wav  (1.74s, peak -11.3 dBFS)
+```
+
+起動時に、その回で実際に使った設定が `recordings/run_YYYYMMDD_HHMMSS.toml` として
+1 本残ります（再現用。良い値が見つかったら `wan-pulse.toml` にコピーできます）。
+
+### 3. peak を見て閾値を決める
+
+保存された `.wav` を聞きつつ、ファイル名の `peak…dBFS` を眺めます。
+
+- **犬の鳴き声**のファイルの peak（例 −12 dB 前後）と、
+- **拾いたくない生活音**のファイルの peak（例 −45 dB 前後）
+
+の**間**に `threshold_db` を置けば、鳴き声だけが残ります（例: `-30`）。
+リアルタイムに数値を見たい場合は `monitor` も使えます。
 
 ```bash
 wan-pulse monitor
@@ -133,39 +183,29 @@ wan-pulse monitor
   -12.1 dBFS |##################################      |  <== over threshold
 ```
 
-静かな状態の値と、手を叩く／犬が鳴いたときの値の**間**に閾値を置くのがコツです。
-例: 暗騒音 −58 dB、鳴き声 −15 dB なら `--threshold-db -40` あたり。
+決めた値を `wan-pulse.toml` に書いて、本運用へ。
 
-### 3. 録音する（無音スキップ＋区間保存）
-
-```bash
-wan-pulse run --threshold-db -40
+```toml
+# wan-pulse.toml
+threshold_db = -30.0
 ```
 
-音が閾値を超えると録音区間が始まり、`--post-margin` 秒ぶん静かになると区間が閉じて、
-`recordings/YYYY-MM-DD/bark_YYYYMMDD_HHMMSS_mmm.wav` として保存されます。
-保存のたびにファイル名・長さ・ピーク音量が表示されます。`Ctrl+C` で停止します。
+#### 設定できる値（`wan-pulse.toml` のキー / 対応する CLI フラグ）
 
-```
-[wan-pulse] listening: 16000 Hz, 1 ch, block 30 ms, threshold -40.0 dBFS
-[wan-pulse] saving segments under ./recordings/  (Ctrl+C to stop)
-[wan-pulse] saved bark_20260530_071530_812.wav  (1.74s, peak -11.3 dBFS)
-```
-
-#### よく使うオプション
-
-| オプション | 既定値 | 説明 |
+| キー / フラグ | 既定値 | 説明 |
 | --- | --- | --- |
-| `--threshold-db` | `-40.0` | 検知の閾値（dBFS）。小さいほど敏感 |
-| `--pre-margin` | `0.5` | 検知の**前**に残す秒数（鳴き始めの切れ防止） |
-| `--post-margin` | `0.8` | この秒数ぶん静かになったら区間を閉じる |
-| `--min-segment` | `0.3` | これより短い区間はノイズとして破棄 |
-| `--max-segment` | `15.0` | 1 区間の最大長（暴走防止） |
-| `--samplerate` | `16000` | サンプルレート(Hz)。M-305 が拒否する場合は `44100` / `48000` を試す |
-| `--device` | 既定入力 | 入力デバイス（番号 or 名前の一部） |
-| `--output-dir` | `recordings` | 保存先ディレクトリ |
+| `threshold_db` / `--threshold-db` | `-40.0` | 検知の閾値（dBFS）。小さいほど敏感（テンプレートは `-60`） |
+| `pre_margin_sec` / `--pre-margin` | `0.5` | 検知の**前**に残す秒数（鳴き始めの切れ防止） |
+| `post_margin_sec` / `--post-margin` | `0.8` | この秒数ぶん静かになったら区間を閉じる |
+| `min_segment_sec` / `--min-segment` | `0.3` | これより短い区間はノイズとして破棄 |
+| `max_segment_sec` / `--max-segment` | `15.0` | 1 区間の最大長（暴走防止） |
+| `samplerate` / `--samplerate` | `16000` | サンプルレート(Hz)。M-305 が拒否する場合は `44100` / `48000` |
+| `channels` / `--channels` | `1` | 入力チャンネル数 |
+| `block_ms` / `--block-ms` | `30.0` | 1 ブロックの長さ(ms)。検知の時間分解能 |
+| `device` / `--device` | 既定入力 | 入力デバイス（番号 or 名前の一部） |
+| `output_dir` / `--output-dir` | `recordings` | 保存先ディレクトリ |
 
-全オプションは `wan-pulse run --help` で確認できます。
+全オプションは `wan-pulse run --help`、別ファイル指定は `--config path/to.toml` です。
 
 ---
 

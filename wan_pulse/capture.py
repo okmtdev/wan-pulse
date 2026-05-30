@@ -56,6 +56,12 @@ class Capture:
         )
         print(f"[wan-pulse] saving segments under ./{cfg.output_dir}/  (Ctrl+C to stop)")
 
+        # Snapshot the effective settings so this batch of recordings is reproducible.
+        from .configfile import write_run_log
+
+        log_path = write_run_log(cfg)
+        print(f"[wan-pulse] run settings -> {log_path}")
+
         stream = sd.InputStream(
             samplerate=cfg.samplerate,
             blocksize=cfg.blocksize,

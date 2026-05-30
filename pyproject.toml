@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.21",
     "sounddevice>=0.4.6",
     "soundfile>=0.12.1",
+    "tomli>=1.1.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
