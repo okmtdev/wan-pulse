@@ -1,0 +1,7 @@
+# Runtime dependencies for wan-pulse.
+# (You can also install everything via `pip install -e .` using pyproject.toml.)
+numpy>=1.21
+sounddevice>=0.4.6
+soundfile>=0.12.1
+# TOML config parsing: stdlib `tomllib` on 3.11+, this fallback on older Pythons.
+tomli>=1.1.0; python_version < "3.11"

@@ -1,0 +1,30 @@
+[Unit]
+Description=wan-pulse - record dog barks from the microphone
+Documentation=https://github.com/okmtdev/wan-pulse
+# Wait until the audio subsystem is up before starting.
+After=sound.target network-online.target
+Wants=sound.target
+
+[Service]
+Type=simple
+
+# --- EDIT THESE THREE for your machine ---------------------------------
+# The (non-root) user the service runs as. Must be in the 'audio' group:
+#   sudo usermod -aG audio pi
+User=pi
+# Repo checkout. wan-pulse.toml and recordings/ are resolved relative to this.
+WorkingDirectory=/home/pi/wan-pulse
+# Path to the installed console script (use your venv if you made one).
+ExecStart=/home/pi/wan-pulse/.venv/bin/wan-pulse run
+# -----------------------------------------------------------------------
+
+# Keep it alive across crashes / device hiccups.
+Restart=on-failure
+RestartSec=3
+
+# Logs go to the journal:  journalctl -u wan-pulse -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

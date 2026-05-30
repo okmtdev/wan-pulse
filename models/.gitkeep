@@ -1,0 +1,2 @@
+# Model files are downloaded here by scripts/download-yamnet.sh and are
+# git-ignored (see .gitignore). This file just keeps the directory present.
