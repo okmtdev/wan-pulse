@@ -55,6 +55,7 @@ _FIELD_COMMENTS: dict[str, str] = {
     "min_segment_sec": "これより短い区間はノイズとして破棄",
     "max_segment_sec": "1区間の最大長(暴走防止)",
     "output_dir": ".wav の保存先",
+    "run_log_dir": "run_*.toml(設定スナップショット)の保存先",
 }
 
 # A low starting threshold so nothing is missed while you tune. Raise it once
@@ -190,7 +191,7 @@ def write_run_log(
 ) -> Path:
     """Drop a TOML snapshot of the effective config under the output dir."""
     when = when or _dt.datetime.now()
-    out_dir = Path(config.output_dir)
+    out_dir = Path(config.run_log_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / when.strftime("run_%Y%m%d_%H%M%S.toml")
     header = [

@@ -57,6 +57,10 @@ class CaptureConfig:
     """Directory where .wav segments are written (organized into per-day
     subfolders)."""
 
+    run_log_dir: str = "runs"
+    """Directory for the per-run settings snapshots (run_*.toml). Kept separate
+    from output_dir so they don't pile up among the recordings."""
+
     @property
     def blocksize(self) -> int:
         """Number of samples per block (derived from block_ms and samplerate)."""

@@ -73,6 +73,7 @@ def _resolve(args: argparse.Namespace) -> CaptureConfig:
         "min_segment_sec": getattr(args, "min_segment", None),
         "max_segment_sec": getattr(args, "max_segment", None),
         "output_dir": getattr(args, "output_dir", None),
+        "run_log_dir": getattr(args, "run_log_dir", None),
     }
     config = configfile.resolve_config(file_values, overrides)
     if config_path is not None:
@@ -217,6 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="hard cap on a single segment")
     p_run.add_argument("--output-dir", dest="output_dir", default=None,
                        help="where to write .wav files")
+    p_run.add_argument("--run-log-dir", dest="run_log_dir", default=None,
+                       help="where to write the per-run settings snapshot (run_*.toml)")
     p_run.add_argument("--classify", action=argparse.BooleanOptionalAction, default=None,
                        help="run inference on each saved segment (--no-classify to disable)")
     _add_classify_args(p_run)

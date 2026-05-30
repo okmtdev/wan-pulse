@@ -160,13 +160,14 @@ recordings/2026-05-30/bark_20260530_071530_812_peak-11.3dBFS.wav
 [wan-pulse] mic: USB PnP Sound Device  (device=USB PnP Sound Device, max in ch 1, native 48000 Hz)
 [wan-pulse] listening: 16000 Hz, 1 ch, block 30 ms, threshold -60.0 dBFS
 [wan-pulse] saving segments under ./recordings/  (Ctrl+C to stop)
-[wan-pulse] run settings -> recordings/run_20260530_071500.toml
+[wan-pulse] run settings -> runs/run_20260530_071500.toml
 [wan-pulse] saved bark_20260530_071530_812_peak-11.3dBFS.wav  (1.74s, peak -11.3 dBFS)
 ```
 
 起動時に、**実際にどのマイクから録っているか**（解決後のデバイス名）が出るので、
 `device` 指定が意図通りか確認できます。その回で使った設定は
-`recordings/run_YYYYMMDD_HHMMSS.toml` として 1 本残ります（再現用）。
+`runs/run_YYYYMMDD_HHMMSS.toml` として 1 本残ります（再現用。`recordings/` とは別ディレクトリ。
+変更は `run_log_dir` / `--run-log-dir`）。
 
 ### ログ
 

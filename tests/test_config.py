@@ -50,9 +50,10 @@ def test_load_missing_explicit_file_raises(tmp_path):
 
 
 def test_run_log_roundtrips(tmp_path):
-    config = CaptureConfig(output_dir=str(tmp_path), threshold_db=-37.5, device="M-305")
+    config = CaptureConfig(run_log_dir=str(tmp_path), threshold_db=-37.5, device="M-305")
     path = configfile.write_run_log(config)
     assert path.exists() and path.suffix == ".toml"
+    assert path.parent == tmp_path  # written to run_log_dir, not output_dir
     # The snapshot must parse back into an equivalent config.
     values = configfile.load_file_values(path)
     assert values["threshold_db"] == -37.5
@@ -60,7 +61,7 @@ def test_run_log_roundtrips(tmp_path):
 
 
 def test_run_log_handles_none_device(tmp_path):
-    config = CaptureConfig(output_dir=str(tmp_path), device=None)
+    config = CaptureConfig(run_log_dir=str(tmp_path), device=None)
     path = configfile.write_run_log(config)
     values = configfile.load_file_values(path)
     # device is None -> rendered as a comment -> absent on reload.

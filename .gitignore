@@ -154,8 +154,10 @@ venv/
 env/
 
 # --- wan-pulse ---
-# Captured audio segments and per-run logs should not be committed.
+# Captured audio segments should not be committed.
 recordings/
+# Per-run settings snapshots (run_*.toml).
+runs/
 # Processing logs.
 logs/
 # Local tuning config (device/threshold differ per machine: Mac dev vs RPi prod).
