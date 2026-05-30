@@ -289,8 +289,23 @@ wan-pulse run                  # 再起動
 - 推論は「鳴った時だけ」走る重い処理。依存は**任意インストール**で、入れなければ
   これまで通り録音のみで動きます。
 
-> ⚠️ これは「感情」ではなく **AudioSet のクラス**を出します。`Dog/Bark/Howl/Growling/
-> Whimper(dog)…` を拾って「犬らしさ＋発声タイプ」を返す、感情ステージの土台です。
+> YAMNet 自体は **AudioSet のクラス**（`Dog/Bark/Howl/Growling/Whimper(dog)…`）を出します。
+> その発声タイプから **粗い感情**を**ルールで**ざっくり付けます（下記）。学習済みの
+> 感情モデルではなく、あくまで「とりあえず版」の目安です。
+
+#### 発声タイプ → 感情（ルール）
+
+| 発声 | 感情（目安） |
+| --- | --- |
+| Growling（唸り） | 威嚇・警戒 |
+| Bark / Bow-wow（吠え） | 警戒・興奮 |
+| Bay（遠吠え風） | 警戒 |
+| Howl（遠吠え） | 遠吠え（呼びかけ・寂しさ） |
+| Whimper（クンクン） | 不安・甘え |
+| Yip（キャン） | 興奮・驚き |
+
+犬と判定された区間にだけ付き、検出された発声タイプのうち**最もスコアの高いもの**で
+決めます（`wan_pulse/emotion.py`）。データが貯まったら学習モデルに差し替え可能。
 
 ### セットアップ
 
@@ -320,7 +335,7 @@ wan-pulse run --classify
 ```
 [wan-pulse] classifying each segment (ai_edge_litert.interpreter)
 [wan-pulse] saved bark_20260530_171500_999_peak-12.3dBFS.wav  (1.56s, peak -12.3 dBFS)
-[wan-pulse] classified bark_20260530_171500_999_peak-12.3dBFS.wav  -> Bark 0.82 [dog:Bark 0.82]
+[wan-pulse] classified bark_20260530_171500_999_peak-12.3dBFS.wav  -> Bark 0.82 [dog:Bark 0.82] 感情:警戒・興奮
 ```
 
 `.wav` の隣に同名の `.json`（サイドカー）が出ます:
@@ -328,6 +343,7 @@ wan-pulse run --classify
 ```json
 { "file": "bark_...wav", "top_label": "Bark", "top_score": 0.82,
   "is_dog": true, "dog_label": "Bark", "dog_score": 0.82,
+  "emotion": "警戒・興奮", "emotion_basis": "Bark", "emotion_score": 0.82,
   "top_k": [["Bark", 0.82], ["Dog", 0.41], ...], "backend": "..." }
 ```
 
@@ -366,9 +382,10 @@ pytest
 ## 今後の予定
 
 - ✅ **犬判定／発声タイプの推論**（YAMNet・上記「推論」セクション）
-- ⬜ **ラベル付けの回し**: 保存 wav とサイドカーをレビューして「犬/非犬・タイプ」を
+- ✅ **感情推論（とりあえず版）**: 発声タイプ → 粗い感情のルール対応（`emotion.py`）
+- ⬜ **ラベル付けの回し**: 保存 wav とサイドカーをレビューして「犬/非犬・タイプ・感情」を
   蓄積し、自前データを作る
-- ⬜ **感情推論**: まずは発声タイプ → 粗い状態のルール対応、データが貯まったら自前学習
+- ⬜ **感情推論（本番版）**: 貯めたデータで学習／ルールの精度検証
 - ⬜ 推論結果の **記録・通知**（DB/Slack 等）
 
 推論結果は `on_segment` で即時に得られるので、通知や記録はこのフックに足せます。

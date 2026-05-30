@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import ClassifyConfig
+from .emotion import EMOTION_BY_CLASS, Emotion, infer_emotion
 
 YAMNET_SAMPLERATE = 16_000
 
@@ -47,6 +48,10 @@ class Classification:
     dog_score: float
     top_k: list[tuple[str, float]] = field(default_factory=list)
     backend: str = ""
+    # Rough, rule-based emotion guess (see emotion.py). None unless it's a dog.
+    emotion: str | None = None
+    emotion_basis: str | None = None
+    emotion_score: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -55,13 +60,17 @@ class Classification:
             "is_dog": self.is_dog,
             "dog_label": self.dog_label,
             "dog_score": round(self.dog_score, 4),
+            "emotion": self.emotion,
+            "emotion_basis": self.emotion_basis,
+            "emotion_score": round(self.emotion_score, 4),
             "top_k": [[name, round(score, 4)] for name, score in self.top_k],
             "backend": self.backend,
         }
 
     def summary(self) -> str:
         tag = f"[dog:{self.dog_label} {self.dog_score:.2f}]" if self.is_dog else "[not-dog]"
-        return f"{self.top_label} {self.top_score:.2f} {tag}"
+        emo = f" 感情:{self.emotion}" if self.emotion else ""
+        return f"{self.top_label} {self.top_score:.2f} {tag}{emo}"
 
 
 class Classifier(ABC):
@@ -91,15 +100,29 @@ def scores_to_classification(
         if labels[i] in DOG_CLASS_NAMES:
             dog_label, dog_score = labels[i], float(scores[i])
             break
+    is_dog = dog_score >= dog_threshold
+
+    # Rough emotion guess from the expressive vocalization scores (dogs only).
+    emo = Emotion(None, None, 0.0)
+    if is_dog:
+        expressive = {
+            labels[i]: float(scores[i])
+            for i in range(len(labels))
+            if labels[i] in EMOTION_BY_CLASS
+        }
+        emo = infer_emotion(expressive)
 
     return Classification(
         top_label=top_label,
         top_score=top_score,
-        is_dog=dog_score >= dog_threshold,
+        is_dog=is_dog,
         dog_label=dog_label,
         dog_score=dog_score,
         top_k=top,
         backend=backend,
+        emotion=emo.state,
+        emotion_basis=emo.basis,
+        emotion_score=emo.score,
     )
 
 
