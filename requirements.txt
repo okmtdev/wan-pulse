@@ -1,0 +1,5 @@
+# Runtime dependencies for wan-pulse.
+# (You can also install everything via `pip install -e .` using pyproject.toml.)
+numpy>=1.21
+sounddevice>=0.4.6
+soundfile>=0.12.1
