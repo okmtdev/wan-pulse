@@ -194,7 +194,7 @@ INDEX_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>wan-pulse</title>
+<title>wan-pulse local admin</title>
 <style>
   :root { --green:#0b6b4f; --rust:#7a2e16; --bg:#f6f7f5; --card:#fff; --line:#e3e6e1; }
   * { box-sizing: border-box; }
@@ -228,7 +228,7 @@ INDEX_HTML = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>🐕 wan-pulse</h1>
+  <h1>🐕 wan-pulse <span style="font-weight:400;font-size:13px;color:#b9c2bd">local admin</span></h1>
   <span class="stats" id="stats"></span>
   <div class="filters">
     <button data-f="all" class="active">すべて</button>
