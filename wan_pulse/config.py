@@ -111,3 +111,35 @@ class ClassifyConfig:
         if self.top_k < 1:
             raise ValueError("top_k must be >= 1")
 
+
+@dataclass
+class NotifyConfig:
+    """Settings for the (optional) notification stage.
+
+    Posts a message to Slack when a dog is detected. The webhook URL is a
+    secret, so it is read from an environment variable rather than the config
+    file. Disabled by default.
+    """
+
+    enabled: bool = False
+    """Send a Slack notification for qualifying segments."""
+
+    webhook_env: str = "WAN_PULSE_SLACK_WEBHOOK"
+    """Name of the env var holding the Slack Incoming Webhook URL."""
+
+    only_dog: bool = True
+    """Only notify for segments classified as a dog (skip other noises)."""
+
+    min_dog_score: float = 0.0
+    """Extra gate: require the dog score to be at least this to notify."""
+
+    cooldown_sec: float = 30.0
+    """Minimum seconds between notifications (avoids spam on continuous barking)."""
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.min_dog_score <= 1.0:
+            raise ValueError("min_dog_score must be in [0, 1]")
+        if self.cooldown_sec < 0:
+            raise ValueError("cooldown_sec must be non-negative")
+
+

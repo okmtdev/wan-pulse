@@ -97,7 +97,24 @@ def test_resolve_classify_precedence():
 def test_template_includes_classify_table(tmp_path):
     path = tmp_path / configfile.DEFAULT_CONFIG_NAME
     path.write_text(configfile.template_toml(), encoding="utf-8")
-    assert "[classify]" in path.read_text()
-    # Template must round-trip through both loaders.
+    text = path.read_text()
+    assert "[classify]" in text and "[notify]" in text
+    # Template must round-trip through all loaders.
     configfile.load_file_values(path)
     assert configfile.load_classify_values(path)["enabled"] is False
+    assert configfile.load_notify_values(path)["enabled"] is False
+
+
+def test_notify_table_parsed_separately(tmp_path):
+    path = tmp_path / "wan-pulse.toml"
+    path.write_text(
+        'threshold_db = -30.0\n\n[notify]\nenabled = true\ncooldown_sec = 60.0\n',
+        encoding="utf-8",
+    )
+    # [notify] must not trip the audio-key validator.
+    assert "notify" not in configfile.load_file_values(path)
+    assert configfile.load_notify_values(path) == {"enabled": True, "cooldown_sec": 60.0}
+    cfg = configfile.resolve_notify(
+        configfile.load_notify_values(path), {"enabled": None}
+    )
+    assert cfg.enabled is True and cfg.cooldown_sec == 60.0

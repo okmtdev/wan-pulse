@@ -94,6 +94,25 @@ def _resolve_classify(args: argparse.Namespace, *, force_enabled: bool = False):
     return configfile.resolve_classify(file_values, overrides)
 
 
+def _resolve_notify(args: argparse.Namespace):
+    """Build the NotifyConfig: defaults < [notify] table < CLI flags."""
+    config_path = configfile.find_config(getattr(args, "config", None))
+    file_values = configfile.load_notify_values(config_path)
+    overrides = {"enabled": getattr(args, "notify", None)}
+    return configfile.resolve_notify(file_values, overrides)
+
+
+def _build_notifier(notify_config):
+    """Instantiate the Slack notifier, warning (not failing) if misconfigured."""
+    from .notify import load_notifier
+
+    try:
+        return load_notifier(notify_config)
+    except ValueError as exc:
+        log.warning("[wan-pulse] notifications disabled: %s", exc)
+        return None
+
+
 def _build_classifier(classify_config):
     """Instantiate the classifier, with a friendly error on missing deps/model."""
     from .classify import load_classifier
@@ -152,6 +171,7 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     config = _resolve(args)
     classify_config = _resolve_classify(args)
+    notify_config = _resolve_notify(args)
 
     classifier = None
     if classify_config.enabled:
@@ -159,7 +179,20 @@ def cmd_run(args: argparse.Namespace) -> int:
         if classifier is None:
             return 1  # deps/model missing; error already printed
 
-    Capture(config, classifier=classifier, classify_config=classify_config).run()
+    notifier = None
+    if notify_config.enabled:
+        if classifier is None:
+            log.warning("[wan-pulse] notify requires classify; enable [classify] too.")
+        else:
+            notifier = _build_notifier(notify_config)
+
+    Capture(
+        config,
+        classifier=classifier,
+        classify_config=classify_config,
+        notifier=notifier,
+        notify_config=notify_config,
+    ).run()
     return 0
 
 
@@ -222,6 +255,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="where to write the per-run settings snapshot (run_*.toml)")
     p_run.add_argument("--classify", action=argparse.BooleanOptionalAction, default=None,
                        help="run inference on each saved segment (--no-classify to disable)")
+    p_run.add_argument("--notify", action=argparse.BooleanOptionalAction, default=None,
+                       help="send a Slack notification on dog detection (--no-notify to disable)")
     _add_classify_args(p_run)
     _add_log_args(p_run)
     p_run.set_defaults(func=cmd_run)

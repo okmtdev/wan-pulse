@@ -18,6 +18,7 @@ from .classify import Classifier
 from .config import CaptureConfig
 from .gate import EnergyGate, Segment, rms_dbfs
 from .logsetup import get_logger
+from .notify import Notifier
 from .writer import SegmentWriter
 
 log = get_logger()
@@ -32,6 +33,8 @@ class Capture:
         *,
         classifier: Classifier | None = None,
         classify_config=None,
+        notifier: Notifier | None = None,
+        notify_config=None,
         record: bool = True,
         on_segment: Callable[[Segment], None] | None = None,
         on_block: Callable[[float], None] | None = None,
@@ -41,6 +44,8 @@ class Capture:
         self.writer = SegmentWriter(config.output_dir)
         self._classifier = classifier
         self._classify_config = classify_config
+        self._notifier = notifier
+        self._notify_config = notify_config
         self._record = record
         self._on_segment = on_segment
         self._on_block = on_block
@@ -89,10 +94,14 @@ class Capture:
                 backend = getattr(self._classifier, "backend", "")
                 suffix = f" ({backend})" if backend else ""
                 log.info("[wan-pulse] classifying each segment%s", suffix)
+            if self._notifier is not None:
+                log.info("[wan-pulse] Slack notifications enabled")
             # Snapshot the effective settings so this batch is reproducible.
             from .configfile import write_run_log
 
-            log_path = write_run_log(cfg, classify=self._classify_config)
+            log_path = write_run_log(
+                cfg, classify=self._classify_config, notify=self._notify_config
+            )
             log.info("[wan-pulse] run settings -> %s", log_path)
 
         self._start_classifier()
@@ -188,6 +197,8 @@ class Capture:
         }
         self.writer.write_sidecar(wav_path, payload)
         log.info("[wan-pulse] classified %s  -> %s", wav_path.name, result.summary())
+        if self._notifier is not None:
+            self._notifier.notify(result, wav_path, segment)
         return result.summary()
 
     def _shutdown_classifier(self) -> None:

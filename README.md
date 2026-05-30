@@ -367,6 +367,68 @@ top_k = 5                                     # サイドカーに残す上位�
 
 ---
 
+## Slack 通知 ※任意
+
+犬を検知したら Slack に通知します（推論＝`[classify]` 有効が前提）。
+個人チャンネル向けに、一番簡単な **Incoming Webhook** を使います。
+
+### 手順（Slack 側の操作 — ここはあなたの作業）
+
+1. https://api.slack.com/apps を開き **「Create New App」→「From scratch」**。
+   名前は `wan-pulse` など、ワークスペースは自分のを選択。
+2. 左メニュー **「Incoming Webhooks」** を開き、**Activate Incoming Webhooks** を **On**。
+3. 下の **「Add New Webhook to Workspace」** をクリック → **通知したいチャンネル**
+   （自分用チャンネルや DM）を選んで **許可**。
+4. 生成された **Webhook URL**（`https://hooks.slack.com/services/T000/B000/xxxx`）をコピー。
+
+### 手順（マシン側の操作）
+
+Webhook URL は秘密なので、設定ファイルではなく**環境変数**で渡します。
+
+```bash
+export WAN_PULSE_SLACK_WEBHOOK="https://hooks.slack.com/services/T000/B000/xxxx"
+wan-pulse run --classify --notify
+```
+
+`wan-pulse.toml` で常時有効にする場合（URL は書かない）:
+
+```toml
+[classify]
+enabled = true            # 通知には推論が必要
+
+[notify]
+enabled = true            # run --notify と同等
+only_dog = true           # 犬と判定された時だけ通知
+min_dog_score = 0.0       # 犬スコアの下限（厳しくしたいなら上げる）
+cooldown_sec = 30.0       # 連続通知の最小間隔（鳴き続けても spam しない）
+webhook_env = "WAN_PULSE_SLACK_WEBHOOK"   # URL を入れた環境変数名
+```
+
+通知が来るとこんな感じです:
+
+```
+🐕 ワンパルス: 犬を検知
+感情: 警戒・興奮（Bark 0.58）
+犬らしさ: Dog 0.68
+ファイル: bark_20260530_220556_259_peak-38.9dBFS.wav（4.7s, peak -38.9 dBFS）
+```
+
+> 環境変数が未設定だと通知は自動でオフ（警告ログのみ）で、録音・推論は通常通り続きます。
+> 通知はバックグラウンドのワーカースレッドから送るので、ネットワーク失敗でも録音は止まりません。
+
+#### systemd で常時通知する場合
+
+サービスからも環境変数が見えるよう、`wan-pulse.service` に 1 行足します:
+
+```ini
+[Service]
+Environment=WAN_PULSE_SLACK_WEBHOOK=https://hooks.slack.com/services/T000/B000/xxxx
+```
+
+（`sudo systemctl daemon-reload && sudo systemctl restart wan-pulse` で反映）
+
+---
+
 ## テスト
 
 マイク不要で、合成波形を使ってエネルギーゲートとリングバッファを検証します
@@ -386,6 +448,7 @@ pytest
 - ⬜ **ラベル付けの回し**: 保存 wav とサイドカーをレビューして「犬/非犬・タイプ・感情」を
   蓄積し、自前データを作る
 - ⬜ **感情推論（本番版）**: 貯めたデータで学習／ルールの精度検証
-- ⬜ 推論結果の **記録・通知**（DB/Slack 等）
+- ✅ **通知**: 犬検知で Slack へ（上記「Slack 通知」セクション）
+- ⬜ **記録**: 検知履歴を DB やスプレッドシートに蓄積（任意）
 
-推論結果は `on_segment` で即時に得られるので、通知や記録はこのフックに足せます。
+推論結果は分類ワーカーで得られるので、別の通知先（LINE/メール等）も同じフックに足せます。

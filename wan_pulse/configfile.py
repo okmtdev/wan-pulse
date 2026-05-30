@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .config import CaptureConfig, ClassifyConfig
+from .config import CaptureConfig, ClassifyConfig, NotifyConfig
 
 try:  # Python 3.11+
     import tomllib as _toml
@@ -31,9 +31,10 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on 3.9/3.10
 
 DEFAULT_CONFIG_NAME = "wan-pulse.toml"
 
-# Inference settings live under a [classify] table so they're clearly separate
-# from the audio-capture keys.
+# Inference / notification settings live under their own tables so they're
+# clearly separate from the audio-capture keys.
 CLASSIFY_TABLE = "classify"
+NOTIFY_TABLE = "notify"
 
 _CLASSIFY_COMMENTS: dict[str, str] = {
     "enabled": "true で保存区間を推論(犬か/発声タイプ)。要 .[infer] とモデル",
@@ -41,6 +42,14 @@ _CLASSIFY_COMMENTS: dict[str, str] = {
     "labels_path": "AudioSet クラスマップ CSV",
     "dog_threshold": "犬クラスのスコアがこれ以上で「犬」と判定",
     "top_k": "サイドカー JSON に残す上位ラベル数",
+}
+
+_NOTIFY_COMMENTS: dict[str, str] = {
+    "enabled": "true で犬検知時に Slack 通知(要 classify 有効)",
+    "webhook_env": "Slack Webhook URL を入れる環境変数名(URL自体はここに書かない)",
+    "only_dog": "犬と判定された区間だけ通知",
+    "min_dog_score": "犬スコアがこれ以上のときだけ通知",
+    "cooldown_sec": "連続通知の最小間隔(秒)。鳴き続けても spam しない",
 }
 
 # Per-field inline comments used when rendering the template / run log.
@@ -92,8 +101,9 @@ def render_toml(
     *,
     header_lines: list[str] | None = None,
     classify: ClassifyConfig | None = None,
+    notify: NotifyConfig | None = None,
 ) -> str:
-    """Render a CaptureConfig (and optional [classify] table) as commented TOML."""
+    """Render a CaptureConfig (+ optional [classify]/[notify] tables) as TOML."""
     lines: list[str] = []
     for line in header_lines or []:
         lines.append(f"# {line}")
@@ -106,6 +116,10 @@ def render_toml(
         lines.append("")
         lines.append(f"[{CLASSIFY_TABLE}]")
         lines.extend(_render_fields(classify, _CLASSIFY_COMMENTS))
+    if notify is not None:
+        lines.append("")
+        lines.append(f"[{NOTIFY_TABLE}]")
+        lines.extend(_render_fields(notify, _NOTIFY_COMMENTS))
     return "\n".join(lines) + "\n"
 
 
@@ -118,7 +132,9 @@ def template_toml() -> str:
         "チューニングのコツ: まず threshold_db を低め(全部録る)にして起動し、",
         "保存された .wav のファイル名にある peak(dBFS) を見て徐々に上げていく。",
     ]
-    return render_toml(config, header_lines=header, classify=ClassifyConfig())
+    return render_toml(
+        config, header_lines=header, classify=ClassifyConfig(), notify=NotifyConfig()
+    )
 
 
 def find_config(explicit: str | None) -> Path | None:
@@ -141,28 +157,35 @@ def _read_toml(path: Path | None) -> dict[str, Any]:
 def load_file_values(path: Path | None) -> dict[str, Any]:
     """Read known CaptureConfig fields from a TOML file (empty dict if None).
 
-    The optional [classify] table is ignored here (read by load_classify_values).
+    The optional [classify]/[notify] tables are ignored here (read separately).
     """
     data = _read_toml(path)
     valid = {f.name for f in dataclasses.fields(CaptureConfig)}
-    unknown = set(data) - valid - {CLASSIFY_TABLE}
+    unknown = set(data) - valid - {CLASSIFY_TABLE, NOTIFY_TABLE}
     if unknown:
         raise ValueError(f"unknown config keys in {path}: {', '.join(sorted(unknown))}")
     return {k: v for k, v in data.items() if k in valid}
 
 
-def load_classify_values(path: Path | None) -> dict[str, Any]:
-    """Read the [classify] table from a TOML file (empty dict if absent)."""
-    table = _read_toml(path).get(CLASSIFY_TABLE, {})
+def _load_table(path: Path | None, name: str, config_cls) -> dict[str, Any]:
+    table = _read_toml(path).get(name, {})
     if not isinstance(table, dict):
-        raise ValueError(f"[{CLASSIFY_TABLE}] must be a table in {path}")
-    valid = {f.name for f in dataclasses.fields(ClassifyConfig)}
+        raise ValueError(f"[{name}] must be a table in {path}")
+    valid = {f.name for f in dataclasses.fields(config_cls)}
     unknown = set(table) - valid
     if unknown:
-        raise ValueError(
-            f"unknown [{CLASSIFY_TABLE}] keys in {path}: {', '.join(sorted(unknown))}"
-        )
+        raise ValueError(f"unknown [{name}] keys in {path}: {', '.join(sorted(unknown))}")
     return {k: v for k, v in table.items() if k in valid}
+
+
+def load_classify_values(path: Path | None) -> dict[str, Any]:
+    """Read the [classify] table from a TOML file (empty dict if absent)."""
+    return _load_table(path, CLASSIFY_TABLE, ClassifyConfig)
+
+
+def load_notify_values(path: Path | None) -> dict[str, Any]:
+    """Read the [notify] table from a TOML file (empty dict if absent)."""
+    return _load_table(path, NOTIFY_TABLE, NotifyConfig)
 
 
 def resolve_config(
@@ -183,10 +206,20 @@ def resolve_classify(
     return dataclasses.replace(base, **applied) if applied else base
 
 
+def resolve_notify(
+    file_values: dict[str, Any], cli_overrides: dict[str, Any]
+) -> NotifyConfig:
+    """Same precedence as resolve_config, for the notification settings."""
+    base = NotifyConfig(**file_values)
+    applied = {k: v for k, v in cli_overrides.items() if v is not None}
+    return dataclasses.replace(base, **applied) if applied else base
+
+
 def write_run_log(
     config: CaptureConfig,
     *,
     classify: ClassifyConfig | None = None,
+    notify: NotifyConfig | None = None,
     when: _dt.datetime | None = None,
 ) -> Path:
     """Drop a TOML snapshot of the effective config under the output dir."""
@@ -200,6 +233,7 @@ def write_run_log(
         "良い値が見つかったら wan-pulse.toml にコピーして使い回せます。",
     ]
     path.write_text(
-        render_toml(config, header_lines=header, classify=classify), encoding="utf-8"
+        render_toml(config, header_lines=header, classify=classify, notify=notify),
+        encoding="utf-8",
     )
     return path
