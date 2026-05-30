@@ -156,6 +156,8 @@ env/
 # --- wan-pulse ---
 # Captured audio segments and per-run logs should not be committed.
 recordings/
+# Processing logs.
+logs/
 # Local tuning config (device/threshold differ per machine: Mac dev vs RPi prod).
 wan-pulse.toml
 # Downloaded models (fetch with scripts/download-yamnet.sh).

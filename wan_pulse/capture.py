@@ -9,7 +9,6 @@ close. This keeps the real-time audio path from ever blocking on disk I/O.
 from __future__ import annotations
 
 import queue
-import sys
 import threading
 from typing import Callable
 
@@ -18,7 +17,10 @@ import numpy as np
 from .classify import Classifier
 from .config import CaptureConfig
 from .gate import EnergyGate, Segment, rms_dbfs
+from .logsetup import get_logger
 from .writer import SegmentWriter
+
+log = get_logger()
 
 
 class Capture:
@@ -53,29 +55,45 @@ class Capture:
     # The sounddevice callback. Keep it minimal: copy + enqueue only.
     def _audio_callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         if status:
-            print(f"[audio] {status}", file=sys.stderr)
+            log.warning("[wan-pulse] audio status: %s", status)
         # indata is reused by PortAudio; we must copy before queueing.
         self._queue.put(indata.copy())
+
+    def _log_device(self, sd) -> None:
+        """Log which microphone we're actually capturing from."""
+        cfg = self.config
+        spec = cfg.device if cfg.device is not None else "default"
+        try:
+            info = sd.query_devices(cfg.device, "input")
+            log.info(
+                "[wan-pulse] mic: %s  (device=%s, max in ch %s, native %.0f Hz)",
+                info["name"], spec, info["max_input_channels"],
+                info["default_samplerate"],
+            )
+        except Exception as exc:  # noqa: BLE001 - non-fatal, just informational
+            log.warning("[wan-pulse] could not query device '%s': %s", spec, exc)
 
     def run(self) -> None:
         """Open the input stream and process blocks until interrupted."""
         import sounddevice as sd  # imported lazily so tests don't need PortAudio
 
         cfg = self.config
-        print(
-            f"[wan-pulse] listening: {cfg.samplerate} Hz, {cfg.channels} ch, "
-            f"block {cfg.block_ms:.0f} ms, threshold {cfg.threshold_db:.1f} dBFS"
+        self._log_device(sd)
+        log.info(
+            "[wan-pulse] listening: %s Hz, %s ch, block %.0f ms, threshold %.1f dBFS",
+            cfg.samplerate, cfg.channels, cfg.block_ms, cfg.threshold_db,
         )
         if self._record:
-            print(f"[wan-pulse] saving segments under ./{cfg.output_dir}/  (Ctrl+C to stop)")
+            log.info("[wan-pulse] saving segments under ./%s/  (Ctrl+C to stop)", cfg.output_dir)
             if self._classifier is not None:
                 backend = getattr(self._classifier, "backend", "")
-                print(f"[wan-pulse] classifying each segment ({backend})".replace(" ()", ""))
+                suffix = f" ({backend})" if backend else ""
+                log.info("[wan-pulse] classifying each segment%s", suffix)
             # Snapshot the effective settings so this batch is reproducible.
             from .configfile import write_run_log
 
             log_path = write_run_log(cfg, classify=self._classify_config)
-            print(f"[wan-pulse] run settings -> {log_path}")
+            log.info("[wan-pulse] run settings -> %s", log_path)
 
         self._start_classifier()
         stream = sd.InputStream(
@@ -90,7 +108,7 @@ class Capture:
             with stream:
                 self._consume_loop()
         except KeyboardInterrupt:
-            print("\n[wan-pulse] stopping...")
+            log.info("[wan-pulse] stopping...")
         finally:
             self._drain_and_flush()
             self._shutdown_classifier()
@@ -124,9 +142,9 @@ class Capture:
             return
         # Save and announce *first* so recording never waits on inference.
         path = self.writer.write(segment)
-        print(
-            f"[wan-pulse] saved {path.name}  "
-            f"({segment.duration_sec:.2f}s, peak {segment.peak_dbfs:.1f} dBFS)"
+        log.info(
+            "[wan-pulse] saved %s  (%.2fs, peak %.1f dBFS)",
+            path.name, segment.duration_sec, segment.peak_dbfs,
         )
         if self._on_segment is not None:
             self._on_segment(segment)
@@ -160,7 +178,7 @@ class Capture:
         try:
             result = self._classifier.classify(segment.audio, segment.samplerate)
         except Exception as exc:  # noqa: BLE001 - keep recording even if inference fails
-            print(f"[wan-pulse] classify failed for {wav_path.name}: {exc}", file=sys.stderr)
+            log.error("[wan-pulse] classify failed for %s: %s", wav_path.name, exc)
             return ""
         payload = {
             "file": wav_path.name,
@@ -169,7 +187,7 @@ class Capture:
             **result.to_dict(),
         }
         self.writer.write_sidecar(wav_path, payload)
-        print(f"[wan-pulse] classified {wav_path.name}  -> {result.summary()}")
+        log.info("[wan-pulse] classified %s  -> %s", wav_path.name, result.summary())
         return result.summary()
 
     def _shutdown_classifier(self) -> None:
@@ -177,7 +195,7 @@ class Capture:
             return
         pending = self._classify_jobs.qsize()
         if pending:
-            print(f"[wan-pulse] finishing {pending} pending classification(s)...")
+            log.info("[wan-pulse] finishing %d pending classification(s)...", pending)
         self._classify_jobs.put(None)  # sentinel after the backlog
         self._classify_thread.join(timeout=30)
         self._classify_thread = None

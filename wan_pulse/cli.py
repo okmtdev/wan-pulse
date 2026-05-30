@@ -19,6 +19,19 @@ from pathlib import Path
 from .capture import Capture
 from .config import CaptureConfig
 from . import configfile
+from .logsetup import DEFAULT_LOG_FILE, get_logger, setup_logging
+
+log = get_logger()
+
+# Commands whose "processing" should be written to the log file.
+_FILE_LOG_COMMANDS = {"run", "monitor", "classify"}
+
+
+def _add_log_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--log-file", default=DEFAULT_LOG_FILE,
+                   help="processing log file ('none' to disable; default: %(default)s)")
+    p.add_argument("--log-level", default="INFO",
+                   help="log verbosity: DEBUG/INFO/WARNING/ERROR (default: %(default)s)")
 
 
 # CLI flags default to None so we can tell "not given" from "given the default",
@@ -63,7 +76,7 @@ def _resolve(args: argparse.Namespace) -> CaptureConfig:
     }
     config = configfile.resolve_config(file_values, overrides)
     if config_path is not None:
-        print(f"[wan-pulse] config: {config_path}")
+        log.info("[wan-pulse] config: %s", config_path)
     return config
 
 
@@ -87,7 +100,7 @@ def _build_classifier(classify_config):
     try:
         return load_classifier(classify_config)
     except (ImportError, FileNotFoundError) as exc:
-        print(f"[wan-pulse] cannot start classifier: {exc}", file=sys.stderr)
+        log.error("[wan-pulse] cannot start classifier: %s", exc)
         return None
 
 
@@ -101,10 +114,10 @@ def _add_classify_args(p: argparse.ArgumentParser) -> None:
 def cmd_init(args: argparse.Namespace) -> int:
     path = Path(args.path or configfile.DEFAULT_CONFIG_NAME)
     if path.exists() and not args.force:
-        print(f"[wan-pulse] {path} already exists (use --force to overwrite)")
+        log.info("[wan-pulse] %s already exists (use --force to overwrite)", path)
         return 1
     path.write_text(configfile.template_toml(), encoding="utf-8")
-    print(f"[wan-pulse] wrote {path}. Edit it, then `wan-pulse run`.")
+    log.info("[wan-pulse] wrote %s. Edit it, then `wan-pulse run`.", path)
     return 0
 
 
@@ -129,7 +142,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 
     # record=False: monitor only shows levels, it never saves or classifies.
     cap = Capture(config, record=False, on_block=on_block)
-    print(f"[wan-pulse] monitoring levels (threshold {config.threshold_db:.1f} dBFS). Ctrl+C to stop.")
+    log.info("[wan-pulse] monitoring levels (threshold %.1f dBFS). Ctrl+C to stop.",
+             config.threshold_db)
     cap.run()
     return 0
 
@@ -163,7 +177,7 @@ def cmd_classify(args: argparse.Namespace) -> int:
         path = Path(raw)
         audio, sr = sf.read(path, dtype="float32", always_2d=False)
         result = classifier.classify(audio, sr)
-        print(f"{path.name}: {result.summary()}")
+        log.info("%s: %s", path.name, result.summary())
         if args.write_sidecar:
             SegmentWriter.write_sidecar(path, {"file": path.name, **result.to_dict()})
     return 0
@@ -188,6 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mon = sub.add_parser("monitor", help="print live levels to calibrate the threshold")
     _add_audio_args(p_mon)
+    _add_log_args(p_mon)
     p_mon.set_defaults(func=cmd_monitor)
 
     p_run = sub.add_parser("run", help="capture and save bark segments")
@@ -205,6 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--classify", action=argparse.BooleanOptionalAction, default=None,
                        help="run inference on each saved segment (--no-classify to disable)")
     _add_classify_args(p_run)
+    _add_log_args(p_run)
     p_run.set_defaults(func=cmd_run)
 
     p_cls = sub.add_parser("classify", help="classify existing .wav files (offline)")
@@ -213,14 +229,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_cls.add_argument("--write-sidecar", action="store_true",
                        help="also write a .json result next to each .wav")
     _add_classify_args(p_cls)
+    _add_log_args(p_cls)
     p_cls.set_defaults(func=cmd_classify)
 
     return parser
 
 
+def _configure_logging(args: argparse.Namespace) -> None:
+    """File logging for processing commands; console-only for init/devices."""
+    raw = getattr(args, "log_file", None)
+    want_file = args.command in _FILE_LOG_COMMANDS and raw not in (None, "", "none", "-")
+    setup_logging(
+        log_file=raw if want_file else None,
+        level=getattr(args, "log_level", "INFO"),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    _configure_logging(args)
     return args.func(args)
 
 

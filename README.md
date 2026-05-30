@@ -156,14 +156,36 @@ recordings/2026-05-30/bark_20260530_071530_812_peak-11.3dBFS.wav
 
 ```
 [wan-pulse] config: wan-pulse.toml
+[wan-pulse] logging to logs/wan-pulse.log
+[wan-pulse] mic: USB PnP Sound Device  (device=USB PnP Sound Device, max in ch 1, native 48000 Hz)
 [wan-pulse] listening: 16000 Hz, 1 ch, block 30 ms, threshold -60.0 dBFS
 [wan-pulse] saving segments under ./recordings/  (Ctrl+C to stop)
 [wan-pulse] run settings -> recordings/run_20260530_071500.toml
 [wan-pulse] saved bark_20260530_071530_812_peak-11.3dBFS.wav  (1.74s, peak -11.3 dBFS)
 ```
 
-起動時に、その回で実際に使った設定が `recordings/run_YYYYMMDD_HHMMSS.toml` として
-1 本残ります（再現用。良い値が見つかったら `wan-pulse.toml` にコピーできます）。
+起動時に、**実際にどのマイクから録っているか**（解決後のデバイス名）が出るので、
+`device` 指定が意図通りか確認できます。その回で使った設定は
+`recordings/run_YYYYMMDD_HHMMSS.toml` として 1 本残ります（再現用）。
+
+### ログ
+
+`run` / `monitor` / `classify` の処理ログは、コンソールと **ログファイルの両方**に
+出ます（既定 `logs/wan-pulse.log`、5MB × 5 世代でローテーション）。
+
+```bash
+wan-pulse run                          # logs/wan-pulse.log に追記
+wan-pulse run --log-file /var/log/wan-pulse.log
+wan-pulse run --log-file none          # ファイル出力を止める（コンソールのみ）
+wan-pulse run --log-level DEBUG        # 詳細度
+```
+
+ファイルにはタイムスタンプ付きで残ります:
+
+```
+2026-05-30 07:15:30,812 INFO    [wan-pulse] saved bark_...wav  (1.74s, peak -11.3 dBFS)
+2026-05-30 07:15:31,002 INFO    [wan-pulse] classified bark_...wav  -> Bark 0.82 [dog:Bark 0.82]
+```
 
 ### 3. peak を見て閾値を決める
 

@@ -39,9 +39,12 @@ sudo ./deploy/install-systemd.sh
 
 ## 運用コマンド
 
+サービスのログは journald（`journalctl`）と、`WorkingDirectory/logs/wan-pulse.log`
+の両方に残ります。
+
 ```bash
 systemctl status wan-pulse
-journalctl -u wan-pulse -f          # ログ追尾
+journalctl -u wan-pulse -f          # ログ追尾（ファイルは <repo>/logs/wan-pulse.log）
 sudo systemctl restart wan-pulse    # コードや wan-pulse.toml を変えたら
 sudo systemctl stop wan-pulse
 sudo systemctl disable wan-pulse    # 自動起動をやめる
