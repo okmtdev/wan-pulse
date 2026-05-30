@@ -205,8 +205,9 @@ INDEX_HTML = """<!doctype html>
   .filters { margin-left:auto; display:flex; gap:6px; }
   .filters button, .reload { background:#2c302d; color:#fff; border:1px solid #3a3f3b; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:13px; }
   .filters button.active { background:var(--green); border-color:var(--green); }
-  main { max-width:900px; margin:18px auto; padding:0 16px; }
+  main { max-width:900px; margin:18px auto 130px; padding:0 16px; }
   .seg { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .seg.active { outline:3px solid var(--green); outline-offset:1px; }
   .seg .row1 { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .when { font-weight:600; }
   .name { color:#7b827d; font-size:12px; word-break:break-all; }
@@ -224,6 +225,13 @@ INDEX_HTML = """<!doctype html>
   .review button { background:var(--green); color:#fff; border:0; border-radius:6px; padding:6px 14px; cursor:pointer; font-size:13px; }
   .review .saved { color:var(--green); font-size:12px; }
   .empty { text-align:center; color:#9aa19b; padding:40px; }
+  #cheats { position:fixed; right:14px; bottom:14px; max-width:360px; pointer-events:none;
+    background:rgba(28,31,29,.92); color:#e8ece9; font-size:12px; line-height:1.7;
+    padding:10px 12px; border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,.25); }
+  #cheats b { color:#fff; }
+  #cheats kbd { background:#3a3f3b; border-radius:4px; padding:0 5px; font-family:ui-monospace,monospace; }
+  #cheats .cont.on { color:#7fe3b6; font-weight:600; }
+  #cheats.hidden { display:none; }
 </style>
 </head>
 <body>
@@ -238,39 +246,63 @@ INDEX_HTML = """<!doctype html>
   </div>
 </header>
 <main id="list"><div class="empty">読み込み中…</div></main>
+<div id="cheats">
+  <b>キーボード</b> · <span class="cont" id="contState"></span><br>
+  <kbd>j</kbd>/<kbd>k</kbd> 移動 · <kbd>Space</kbd> 再生 · <kbd>←</kbd><kbd>→</kbd> シーク · <kbd>r</kbd> 頭出し<br>
+  <kbd>d</kbd> 犬 / <kbd>x</kbd> 非 / <kbd>u</kbd> 未 · <kbd>1</kbd>-<kbd>6</kbd> 感情 / <kbd>0</kbd> 解除<br>
+  <kbd>m</kbd> メモ · <kbd>Enter</kbd> 保存&次 · <kbd>c</kbd> 連続再生 · <kbd>f</kbd> 絞込 · <kbd>?</kbd> 表示切替
+</div>
 <script>
-let SEGS = [], FILTER = "all";
-const $ = (s, e=document) => e.querySelector(s);
-const fmtSize = b => b > 1024*1024 ? (b/1048576).toFixed(1)+"MB" : Math.round(b/1024)+"KB";
-function num(x){ return (x===null||x===undefined) ? "–" : (typeof x==="number" ? x.toFixed(2) : x); }
+let SEGS=[], FILTER="all", VISIBLE=[], CARDS=[], ACTIVE=0, CURRENT=null, CONTINUOUS=false;
+const EMOTIONS=["威嚇・警戒","警戒・興奮","警戒","遠吠え（呼びかけ・寂しさ）","不安・甘え","興奮・驚き"];
+const $=(s,e=document)=>e.querySelector(s);
+const fmtSize=b=>b>1048576?(b/1048576).toFixed(1)+"MB":Math.round(b/1024)+"KB";
+const num=x=>(x===null||x===undefined)?"–":(typeof x==="number"?x.toFixed(2):x);
 
-async function load() {
-  const r = await fetch("/api/segments"); const d = await r.json();
-  SEGS = d.segments;
-  $("#stats").textContent = `全 ${d.stats.total} 件 ・ 犬 ${d.stats.dogs} ・ レビュー済 ${d.stats.reviewed}`;
+async function load(){
+  const r=await fetch("/api/segments"); const d=await r.json(); SEGS=d.segments;
+  $("#stats").textContent=`全 ${d.stats.total} 件 ・ 犬 ${d.stats.dogs} ・ レビュー済 ${d.stats.reviewed}`;
   render();
 }
-function visible() {
-  if (FILTER === "dogs") return SEGS.filter(s => s.meta && s.meta.is_dog);
-  if (FILTER === "unreviewed") return SEGS.filter(s => !s.review);
+function visible(){
+  if(FILTER==="dogs") return SEGS.filter(s=>s.meta&&s.meta.is_dog);
+  if(FILTER==="unreviewed") return SEGS.filter(s=>!s.review);
   return SEGS;
 }
-function render() {
-  const list = $("#list"); const items = visible();
-  if (!items.length) { list.innerHTML = '<div class="empty">該当する区間がありません</div>'; return; }
-  list.innerHTML = "";
-  for (const s of items) list.appendChild(card(s));
+function render(){
+  VISIBLE=visible(); const list=$("#list"); CARDS=[];
+  if(!VISIBLE.length){ list.innerHTML='<div class="empty">該当する区間がありません</div>'; return; }
+  list.innerHTML="";
+  VISIBLE.forEach(s=>{ const c=card(s); list.appendChild(c); CARDS.push(c); });
+  if(ACTIVE>=CARDS.length) ACTIVE=CARDS.length-1; if(ACTIVE<0) ACTIVE=0;
+  applyActive(false);
 }
-function card(s) {
-  const m = s.meta || {}, rv = s.review || {};
-  const el = document.createElement("div"); el.className = "seg";
-  const when = m.timestamp || s.modified;
-  const dogBadge = m.is_dog ? '<span class="badge dog">犬</span>'
-                            : (s.has_sidecar ? '<span class="badge notdog">非犬</span>' : '');
-  const emoBadge = m.emotion ? `<span class="badge emo">${m.emotion}</span>` : '';
-  const revBadge = s.review ? '<span class="badge rev">レビュー済</span>' : '';
-  el.innerHTML = `
-    <div class="row1"><span class="when">${when}</span>${dogBadge}${emoBadge}${revBadge}
+function applyActive(scroll=true){
+  CARDS.forEach((c,i)=>c.classList.toggle("active",i===ACTIVE));
+  if(scroll&&CARDS[ACTIVE]) CARDS[ACTIVE].scrollIntoView({block:"nearest"});
+}
+function setActive(i){ if(!CARDS.length)return; ACTIVE=Math.max(0,Math.min(CARDS.length-1,i)); applyActive(); }
+const aCard=()=>CARDS[ACTIVE], aSeg=()=>VISIBLE[ACTIVE], audioOf=c=>c&&c.querySelector("audio");
+function play(c){ const a=audioOf(c); if(!a)return; if(CURRENT&&CURRENT!==a)CURRENT.pause(); CURRENT=a; a.paused?a.play():a.pause(); }
+function playFromStart(c){ const a=audioOf(c); if(!a)return; if(CURRENT&&CURRENT!==a)CURRENT.pause(); CURRENT=a; a.currentTime=0; a.play(); }
+function seek(c,d){ const a=audioOf(c); if(a)a.currentTime=Math.max(0,a.currentTime+d); }
+function setDog(c,v){ if(c)c.querySelector(".isdog").value=v; }
+function setEmotion(c,t){ if(c)c.querySelector(".emotion").value=t; }
+function setFilter(f){ FILTER=f; ACTIVE=0;
+  document.querySelectorAll(".filters button[data-f]").forEach(x=>x.classList.toggle("active",x.dataset.f===f));
+  render(); }
+function cycleFilter(){ const o=["all","dogs","unreviewed"]; setFilter(o[(o.indexOf(FILTER)+1)%o.length]); }
+function updateMode(){ const e=$("#contState"); e.textContent="連続再生:"+(CONTINUOUS?"ON":"OFF"); e.classList.toggle("on",CONTINUOUS); }
+
+function card(s){
+  const m=s.meta||{}, rv=s.review||{};
+  const el=document.createElement("div"); el.className="seg";
+  const when=m.timestamp||s.modified;
+  const dogBadge=m.is_dog?'<span class="badge dog">犬</span>':(s.has_sidecar?'<span class="badge notdog">非犬</span>':'');
+  const emoBadge=m.emotion?`<span class="badge emo">${m.emotion}</span>`:'';
+  el.innerHTML=`
+    <div class="row1"><span class="when">${when}</span>${dogBadge}${emoBadge}
+      <span class="revslot">${s.review?'<span class="badge rev">レビュー済</span>':''}</span>
       <span class="name">${s.name}</span></div>
     <div class="meta">peak ${num(m.peak_dbfs)}dBFS ・ ${num(m.duration_sec)}s ・
       top: ${m.top_label||"–"} ${num(m.top_score)} ・ dog ${num(m.dog_score)} ・ ${fmtSize(s.size)}</div>
@@ -282,34 +314,65 @@ function card(s) {
         <option value="true">はい</option>
         <option value="false">いいえ</option>
       </select>
-      <input class="emotion" placeholder="感情（任意）" style="width:140px">
+      <input class="emotion" placeholder="感情（任意）" style="width:160px">
       <input class="note" placeholder="メモ（任意）">
       <button>保存</button><span class="saved"></span>
     </div>`;
-  const isdog = $(".isdog", el), emo = $(".emotion", el), note = $(".note", el), saved = $(".saved", el);
-  if (rv.is_dog === true) isdog.value = "true";
-  else if (rv.is_dog === false) isdog.value = "false";
-  emo.value = rv.emotion || (m.emotion || "");
-  note.value = rv.note || "";
-  if (rv.reviewed_at) saved.textContent = "保存済 " + rv.reviewed_at;
-  $("button", el).onclick = async () => {
-    const body = { path: s.id, emotion: emo.value, note: note.value,
-      is_dog: isdog.value === "" ? null : isdog.value === "true" };
-    const r = await fetch("/api/review", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(body) });
-    const d = await r.json();
-    if (d.ok) { saved.textContent = "保存しました " + d.review.reviewed_at;
-      const t = SEGS.find(x => x.id === s.id); if (t) t.review = d.review; }
-    else saved.textContent = "保存失敗: " + (d.error||"");
-  };
+  if(rv.is_dog===true) $(".isdog",el).value="true"; else if(rv.is_dog===false) $(".isdog",el).value="false";
+  $(".emotion",el).value=rv.emotion||(m.emotion||"");
+  $(".note",el).value=rv.note||"";
+  if(rv.reviewed_at) $(".saved",el).textContent="保存済 "+rv.reviewed_at;
+  const a=$("audio",el);
+  a.addEventListener("ended",()=>{ if(CONTINUOUS&&a===audioOf(aCard())&&ACTIVE<CARDS.length-1){ setActive(ACTIVE+1); playFromStart(aCard()); } });
+  $("button",el).onclick=()=>saveCard(el,s);
   return el;
 }
-document.querySelectorAll(".filters button[data-f]").forEach(b =>
-  b.onclick = () => { FILTER = b.dataset.f;
-    document.querySelectorAll(".filters button[data-f]").forEach(x => x.classList.remove("active"));
-    b.classList.add("active"); render(); });
-$("#reload").onclick = load;
-load();
+async function saveCard(el,s,after){
+  const body={ path:s.id, emotion:$(".emotion",el).value, note:$(".note",el).value,
+    is_dog: $(".isdog",el).value===""?null:$(".isdog",el).value==="true" };
+  const saved=$(".saved",el);
+  try{
+    const r=await fetch("/api/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d.ok){ s.review=d.review; saved.textContent="保存しました "+d.review.reviewed_at;
+      if(!$(".revslot .badge",el)) $(".revslot",el).innerHTML='<span class="badge rev">レビュー済</span>';
+      if(after) after();
+    } else saved.textContent="保存失敗: "+(d.error||"");
+  }catch(e){ saved.textContent="保存失敗: "+e; }
+}
+
+document.querySelectorAll(".filters button[data-f]").forEach(b=>b.onclick=()=>setFilter(b.dataset.f));
+$("#reload").onclick=load;
+
+document.addEventListener("keydown",(e)=>{
+  const tag=document.activeElement&&document.activeElement.tagName;
+  const typing=tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT";
+  if(e.key==="Escape"){ if(document.activeElement)document.activeElement.blur(); return; }
+  if(typing) return;
+  if(e.ctrlKey||e.metaKey||e.altKey) return;
+  const c=aCard();
+  switch(e.key){
+    case "j": case "ArrowDown": setActive(ACTIVE+1); e.preventDefault(); break;
+    case "k": case "ArrowUp": setActive(ACTIVE-1); e.preventDefault(); break;
+    case "g": setActive(0); break;
+    case "G": setActive(CARDS.length-1); break;
+    case " ": if(c){play(c);} e.preventDefault(); break;
+    case "ArrowLeft": seek(c,-2); e.preventDefault(); break;
+    case "ArrowRight": seek(c,2); e.preventDefault(); break;
+    case "r": playFromStart(c); break;
+    case "c": CONTINUOUS=!CONTINUOUS; updateMode(); break;
+    case "d": setDog(c,"true"); break;
+    case "x": setDog(c,"false"); break;
+    case "u": setDog(c,""); break;
+    case "m": if(c){ $(".note",c).focus(); e.preventDefault(); } break;
+    case "s": case "Enter": if(c) saveCard(c,aSeg(),()=>setActive(ACTIVE+1)); e.preventDefault(); break;
+    case "f": cycleFilter(); break;
+    case "?": $("#cheats").classList.toggle("hidden"); break;
+    default:
+      if(/^[0-6]$/.test(e.key)&&c){ const n=+e.key; setEmotion(c,n===0?"":(EMOTIONS[n-1]||"")); }
+  }
+});
+updateMode(); load();
 </script>
 </body>
 </html>
