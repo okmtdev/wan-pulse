@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from wan_pulse.notify import SlackNotifier, build_message
+from wan_pulse.notify import SlackFileNotifier, SlackNotifier, build_message, load_notifier
+from wan_pulse.config import NotifyConfig
 
 
 def _dog(emotion="警戒・興奮", is_dog=True, dog_score=0.7):
@@ -80,3 +81,52 @@ def test_transport_failure_is_swallowed():
 
     sent = _notifier(boom).notify(_dog(), Path("a.wav"), _seg())
     assert sent is False  # logged, not raised
+
+
+# --- file-upload notifier (fake uploader, no Slack) ---
+
+def test_file_notifier_uploads_with_caption():
+    calls = []
+
+    def fake_uploader(token, channel, path, caption):
+        calls.append((token, channel, path, caption))
+
+    n = SlackFileNotifier("xoxb-1", "C123", uploader=fake_uploader, clock=lambda: 0.0)
+    assert n.notify(_dog(), Path("a.wav"), _seg()) is True
+    token, channel, path, caption = calls[0]
+    assert token == "xoxb-1" and channel == "C123"
+    assert path == Path("a.wav") and "犬" in caption
+
+
+def test_file_notifier_respects_cooldown():
+    calls = []
+    clock_val = {"t": 0.0}
+    n = SlackFileNotifier(
+        "xoxb-1", "C123",
+        uploader=lambda *a: calls.append(a),
+        cooldown_sec=30.0, clock=lambda: clock_val["t"],
+    )
+    assert n.notify(_dog(), Path("a.wav"), _seg()) is True
+    clock_val["t"] = 5.0
+    assert n.notify(_dog(), Path("b.wav"), _seg()) is False
+    assert len(calls) == 1
+
+
+def test_load_notifier_picks_transport(monkeypatch):
+    # attach_audio -> needs bot token + channel
+    monkeypatch.delenv("WP_BOT", raising=False)
+    cfg = NotifyConfig(enabled=True, attach_audio=True, bot_token_env="WP_BOT", channel="C1")
+    with pytest.raises(ValueError):
+        load_notifier(cfg)
+    monkeypatch.setenv("WP_BOT", "xoxb-abc")
+    assert isinstance(load_notifier(cfg), SlackFileNotifier)
+
+    # attach_audio but missing channel
+    cfg2 = NotifyConfig(enabled=True, attach_audio=True, bot_token_env="WP_BOT", channel="")
+    with pytest.raises(ValueError):
+        load_notifier(cfg2)
+
+    # webhook path
+    monkeypatch.setenv("WP_HOOK", "http://hook")
+    cfg3 = NotifyConfig(enabled=True, webhook_env="WP_HOOK")
+    assert isinstance(load_notifier(cfg3), SlackNotifier)

@@ -46,7 +46,10 @@ _CLASSIFY_COMMENTS: dict[str, str] = {
 
 _NOTIFY_COMMENTS: dict[str, str] = {
     "enabled": "true で犬検知時に Slack 通知(要 classify 有効)",
-    "webhook_env": "Slack Webhook URL を入れる環境変数名(URL自体はここに書かない)",
+    "webhook_env": "Slack Webhook URL を入れる環境変数名(テキストのみ)",
+    "attach_audio": "true で .wav も送る(Webhookではなく Bot トークン必須)",
+    "bot_token_env": "Slack Bot トークン(xoxb-)を入れる環境変数名",
+    "channel": "音声をアップするチャンネルID(例 C0123ABCD)。attach_audio時に必須",
     "only_dog": "犬と判定された区間だけ通知",
     "min_dog_score": "犬スコアがこれ以上のときだけ通知",
     "cooldown_sec": "連続通知の最小間隔(秒)。鳴き続けても spam しない",

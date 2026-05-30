@@ -125,7 +125,16 @@ class NotifyConfig:
     """Send a Slack notification for qualifying segments."""
 
     webhook_env: str = "WAN_PULSE_SLACK_WEBHOOK"
-    """Name of the env var holding the Slack Incoming Webhook URL."""
+    """Name of the env var holding the Slack Incoming Webhook URL (text only)."""
+
+    attach_audio: bool = False
+    """Upload the .wav itself (needs a bot token + channel, not a webhook)."""
+
+    bot_token_env: str = "WAN_PULSE_SLACK_BOT_TOKEN"
+    """Name of the env var holding the Slack bot token (xoxb-...) for uploads."""
+
+    channel: str = ""
+    """Channel ID (e.g. C0123ABCD) to upload the audio to. Required for uploads."""
 
     only_dog: bool = True
     """Only notify for segments classified as a dog (skip other noises)."""

@@ -98,7 +98,10 @@ def _resolve_notify(args: argparse.Namespace):
     """Build the NotifyConfig: defaults < [notify] table < CLI flags."""
     config_path = configfile.find_config(getattr(args, "config", None))
     file_values = configfile.load_notify_values(config_path)
-    overrides = {"enabled": getattr(args, "notify", None)}
+    overrides = {
+        "enabled": getattr(args, "notify", None),
+        "attach_audio": getattr(args, "attach_audio", None),
+    }
     return configfile.resolve_notify(file_values, overrides)
 
 
@@ -257,6 +260,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="run inference on each saved segment (--no-classify to disable)")
     p_run.add_argument("--notify", action=argparse.BooleanOptionalAction, default=None,
                        help="send a Slack notification on dog detection (--no-notify to disable)")
+    p_run.add_argument("--attach-audio", dest="attach_audio",
+                       action=argparse.BooleanOptionalAction, default=None,
+                       help="upload the .wav too (needs a Slack bot token + channel)")
     _add_classify_args(p_run)
     _add_log_args(p_run)
     p_run.set_defaults(func=cmd_run)

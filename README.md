@@ -369,28 +369,24 @@ top_k = 5                                     # サイドカーに残す上位�
 
 ## Slack 通知 ※任意
 
-犬を検知したら Slack に通知します（推論＝`[classify]` 有効が前提）。
-個人チャンネル向けに、一番簡単な **Incoming Webhook** を使います。
+犬を検知したら Slack に通知します（推論＝`[classify]` 有効が前提）。送り方は 2 通り:
 
-### 手順（Slack 側の操作 — ここはあなたの作業）
+- **A. テキストのみ（Incoming Webhook）** — 一番簡単。感情・スコアだけ届く。
+- **B. 音声も送る（Bot トークン + ファイルアップロード）** — `.wav` を Slack に上げて
+  **その場で鳴き声を再生**できる。少しだけ設定が増える。
 
-1. https://api.slack.com/apps を開き **「Create New App」→「From scratch」**。
-   名前は `wan-pulse` など、ワークスペースは自分のを選択。
-2. 左メニュー **「Incoming Webhooks」** を開き、**Activate Incoming Webhooks** を **On**。
-3. 下の **「Add New Webhook to Workspace」** をクリック → **通知したいチャンネル**
-   （自分用チャンネルや DM）を選んで **許可**。
-4. 生成された **Webhook URL**（`https://hooks.slack.com/services/T000/B000/xxxx`）をコピー。
+秘密情報（Webhook URL / Bot トークン）は設定ファイルではなく**環境変数**で渡します。
 
-### 手順（マシン側の操作）
+### A. テキストのみ（Webhook）
 
-Webhook URL は秘密なので、設定ファイルではなく**環境変数**で渡します。
+1. https://api.slack.com/apps → **Create New App → From scratch**（ワークスペースは自分の）。
+2. **Incoming Webhooks** を **On** → **Add New Webhook to Workspace** → 通知先チャンネルを許可。
+3. 出てきた **Webhook URL** をコピー。
 
 ```bash
 export WAN_PULSE_SLACK_WEBHOOK="https://hooks.slack.com/services/T000/B000/xxxx"
 wan-pulse run --classify --notify
 ```
-
-`wan-pulse.toml` で常時有効にする場合（URL は書かない）:
 
 ```toml
 [classify]
@@ -401,10 +397,10 @@ enabled = true            # run --notify と同等
 only_dog = true           # 犬と判定された時だけ通知
 min_dog_score = 0.0       # 犬スコアの下限（厳しくしたいなら上げる）
 cooldown_sec = 30.0       # 連続通知の最小間隔（鳴き続けても spam しない）
-webhook_env = "WAN_PULSE_SLACK_WEBHOOK"   # URL を入れた環境変数名
+webhook_env = "WAN_PULSE_SLACK_WEBHOOK"
 ```
 
-通知が来るとこんな感じです:
+届く通知:
 
 ```
 🐕 ワンパルス: 犬を検知
@@ -413,16 +409,45 @@ webhook_env = "WAN_PULSE_SLACK_WEBHOOK"   # URL を入れた環境変数名
 ファイル: bark_20260530_220556_259_peak-38.9dBFS.wav（4.7s, peak -38.9 dBFS）
 ```
 
-> 環境変数が未設定だと通知は自動でオフ（警告ログのみ）で、録音・推論は通常通り続きます。
-> 通知はバックグラウンドのワーカースレッドから送るので、ネットワーク失敗でも録音は止まりません。
+### B. 音声も送る（Bot トークン + ファイルアップロード）
 
-#### systemd で常時通知する場合
+1. https://api.slack.com/apps → **Create New App → From scratch**。
+2. **OAuth & Permissions** → **Bot Token Scopes** に **`files:write`**（および `chat:write`）を追加。
+3. 同ページ上部 **Install to Workspace** → 許可 → **Bot User OAuth Token**（`xoxb-…`）をコピー。
+4. 通知先チャンネルに **Bot を招待**（チャンネルで `/invite @wan-pulse`）。
+5. **チャンネル ID** を控える（チャンネル名クリック → 一番下に `C0123ABCD…`）。
 
-サービスからも環境変数が見えるよう、`wan-pulse.service` に 1 行足します:
+```bash
+export WAN_PULSE_SLACK_BOT_TOKEN="xoxb-..."
+wan-pulse run --classify --notify --attach-audio
+```
+
+```toml
+[notify]
+enabled = true
+attach_audio = true                          # .wav も送る
+bot_token_env = "WAN_PULSE_SLACK_BOT_TOKEN"  # トークンを入れた環境変数名
+channel = "C0123ABCD"                        # アップ先チャンネルID（必須）
+only_dog = true
+cooldown_sec = 30.0
+```
+
+音声付き通知は、`.wav` が Slack 上で再生可能な状態で、キャプションに上記テキストが付きます
+（16kHz mono の数秒なので数十 KB と軽量）。
+
+> - `attach_audio = true` のときはトークン＋`channel` が必須。未設定なら通知は自動オフ
+>   （警告ログのみ）で、録音・推論は通常通り続きます。
+> - 通知はバックグラウンドのワーカースレッドから送るので、ネットワーク失敗でも録音は止まりません。
+> - 連続検知のたびに音声が飛ぶと多いので、`cooldown_sec` で間隔を空けるのがおすすめ。
+
+### systemd で常時通知する場合
+
+サービスからも環境変数が見えるよう、`wan-pulse.service` に足します（使う方だけ）:
 
 ```ini
 [Service]
 Environment=WAN_PULSE_SLACK_WEBHOOK=https://hooks.slack.com/services/T000/B000/xxxx
+Environment=WAN_PULSE_SLACK_BOT_TOKEN=xoxb-...
 ```
 
 （`sudo systemctl daemon-reload && sudo systemctl restart wan-pulse` で反映）
