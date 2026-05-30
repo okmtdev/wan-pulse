@@ -34,6 +34,7 @@ COLUMNS = [
     "is_dog", "dog_label", "dog_score",
     "emotion", "emotion_basis", "emotion_score",
     "top_label", "top_score",
+    "is_animal", "animal_label", "animal_score",
 ]
 
 
@@ -52,6 +53,9 @@ def build_row(classification, wav_path, segment, when: _dt.datetime) -> dict:
         "emotion_score": round(c.emotion_score, 4),
         "top_label": c.top_label,
         "top_score": round(c.top_score, 4),
+        "is_animal": getattr(c, "is_animal", False),
+        "animal_label": getattr(c, "animal_label", None),
+        "animal_score": round(getattr(c, "animal_score", 0.0), 4),
     }
 
 
@@ -62,7 +66,8 @@ class HistoryRecorder(ABC):
         self.only_dog = only_dog
 
     def record(self, classification, wav_path, segment, when: _dt.datetime | None = None) -> bool:
-        if self.only_dog and not classification.is_dog:
+        is_detection = classification.is_dog or getattr(classification, "is_animal", False)
+        if self.only_dog and not is_detection:
             return False
         row = build_row(classification, wav_path, segment, when or _dt.datetime.now())
         try:

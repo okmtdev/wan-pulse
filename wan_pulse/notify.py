@@ -42,6 +42,15 @@ class Notifier(ABC):
 def build_message(classification, wav_path, segment) -> str:
     """Human-readable Slack message for a detected segment."""
     c = classification
+    is_animal_only = getattr(c, "is_animal", False) and not c.is_dog
+    if is_animal_only:
+        animal = f"{c.animal_label} {c.animal_score:.2f}" if c.animal_label else "—"
+        return (
+            "🐾 ワンパルス: 動物音を検知\n"
+            f"動物ラベル: {animal}\n"
+            f"ファイル: {wav_path.name}（{segment.duration_sec:.1f}s, "
+            f"peak {segment.peak_dbfs:.1f} dBFS）"
+        )
     if c.emotion:
         basis = f"（{c.emotion_basis} {c.emotion_score:.2f}）" if c.emotion_basis else ""
         emotion_line = f"感情: {c.emotion}{basis}"
@@ -144,7 +153,8 @@ class _BaseSlackNotifier(Notifier):
 
     def _passes_filter(self, classification) -> bool:
         c = classification
-        if self.only_dog and not c.is_dog:
+        is_detection = c.is_dog or getattr(c, "is_animal", False)
+        if self.only_dog and not is_detection:
             return False
         if c.dog_score < self.min_dog_score:
             return False

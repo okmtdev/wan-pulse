@@ -105,11 +105,22 @@ class ClassifyConfig:
     top_k: int = 5
     """How many top labels to keep in the per-segment sidecar JSON."""
 
+    animal_detection: bool = False
+    """Also detect generic animal sounds (AudioSet "Animal" / "Domestic animals, pets").
+    When True, segments that pass animal_threshold but not dog_threshold are flagged
+    as is_animal=True and treated as detections by notify/history."""
+
+    animal_threshold: float = 0.3
+    """A segment is flagged as an animal when the best animal-class score is >= this
+    (only evaluated when animal_detection = True)."""
+
     def __post_init__(self) -> None:
         if not 0.0 <= self.dog_threshold <= 1.0:
             raise ValueError("dog_threshold must be in [0, 1]")
         if self.top_k < 1:
             raise ValueError("top_k must be >= 1")
+        if not 0.0 <= self.animal_threshold <= 1.0:
+            raise ValueError("animal_threshold must be in [0, 1]")
 
 
 @dataclass

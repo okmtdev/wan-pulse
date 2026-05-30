@@ -36,6 +36,10 @@ DOG_CLASS_NAMES = frozenset(
     {"Dog", "Bark", "Yip", "Howl", "Bow-wow", "Growling", "Whimper (dog)", "Bay"}
 )
 
+# AudioSet classes that indicate a generic animal sound (but not specifically a dog).
+# Used only when ClassifyConfig.animal_detection = True.
+ANIMAL_CLASS_NAMES = frozenset({"Animal", "Domestic animals, pets"})
+
 
 @dataclass
 class Classification:
@@ -52,6 +56,10 @@ class Classification:
     emotion: str | None = None
     emotion_basis: str | None = None
     emotion_score: float = 0.0
+    # Generic animal detection (enabled by ClassifyConfig.animal_detection).
+    is_animal: bool = False
+    animal_label: str | None = None
+    animal_score: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -63,12 +71,20 @@ class Classification:
             "emotion": self.emotion,
             "emotion_basis": self.emotion_basis,
             "emotion_score": round(self.emotion_score, 4),
+            "is_animal": self.is_animal,
+            "animal_label": self.animal_label,
+            "animal_score": round(self.animal_score, 4),
             "top_k": [[name, round(score, 4)] for name, score in self.top_k],
             "backend": self.backend,
         }
 
     def summary(self) -> str:
-        tag = f"[dog:{self.dog_label} {self.dog_score:.2f}]" if self.is_dog else "[not-dog]"
+        if self.is_dog:
+            tag = f"[dog:{self.dog_label} {self.dog_score:.2f}]"
+        elif self.is_animal:
+            tag = f"[animal:{self.animal_label} {self.animal_score:.2f}]"
+        else:
+            tag = "[not-dog]"
         emo = f" 感情:{self.emotion}" if self.emotion else ""
         return f"{self.top_label} {self.top_score:.2f} {tag}{emo}"
 
@@ -87,6 +103,8 @@ def scores_to_classification(
     *,
     top_k: int,
     dog_threshold: float,
+    animal_detection: bool = False,
+    animal_threshold: float = 0.3,
     backend: str = "",
 ) -> Classification:
     """Turn a per-class score vector into a Classification (pure, testable)."""
@@ -101,6 +119,15 @@ def scores_to_classification(
             dog_label, dog_score = labels[i], float(scores[i])
             break
     is_dog = dog_score >= dog_threshold
+
+    # Generic animal detection (optional, off by default).
+    is_animal, animal_label, animal_score = False, None, 0.0
+    if animal_detection and not is_dog:
+        for i in order:
+            if labels[i] in ANIMAL_CLASS_NAMES:
+                animal_label, animal_score = labels[i], float(scores[i])
+                break
+        is_animal = animal_score >= animal_threshold
 
     # Rough emotion guess from the expressive vocalization scores (dogs only).
     emo = Emotion(None, None, 0.0)
@@ -123,6 +150,9 @@ def scores_to_classification(
         emotion=emo.state,
         emotion_basis=emo.basis,
         emotion_score=emo.score,
+        is_animal=is_animal,
+        animal_label=animal_label,
+        animal_score=animal_score,
     )
 
 
@@ -237,6 +267,8 @@ class YamnetClassifier(Classifier):
             self.labels,
             top_k=self.config.top_k,
             dog_threshold=self.config.dog_threshold,
+            animal_detection=self.config.animal_detection,
+            animal_threshold=self.config.animal_threshold,
             backend=self.backend,
         )
 

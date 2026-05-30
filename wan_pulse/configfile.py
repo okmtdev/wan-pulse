@@ -44,6 +44,8 @@ _CLASSIFY_COMMENTS: dict[str, str] = {
     "labels_path": "AudioSet クラスマップ CSV",
     "dog_threshold": "犬クラスのスコアがこれ以上で「犬」と判定",
     "top_k": "サイドカー JSON に残す上位ラベル数",
+    "animal_detection": "true で犬以外の動物音(Animal/Domestic animals 等)も検知・通知対象にする",
+    "animal_threshold": "動物クラスのスコアがこれ以上で「動物」と判定(animal_detection=true のとき有効)",
 }
 
 _NOTIFY_COMMENTS: dict[str, str] = {
