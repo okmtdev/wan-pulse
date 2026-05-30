@@ -411,11 +411,14 @@ webhook_env = "WAN_PULSE_SLACK_WEBHOOK"
 
 ### B. 音声も送る（Bot トークン + ファイルアップロード）
 
-1. https://api.slack.com/apps → **Create New App → From scratch**。
-2. **OAuth & Permissions** → **Bot Token Scopes** に **`files:write`**（および `chat:write`）を追加。
-3. 同ページ上部 **Install to Workspace** → 許可 → **Bot User OAuth Token**（`xoxb-…`）をコピー。
-4. 通知先チャンネルに **Bot を招待**（チャンネルで `/invite @wan-pulse`）。
-5. **チャンネル ID** を控える（チャンネル名クリック → 一番下に `C0123ABCD…`）。
+1. https://api.slack.com/apps → **Create New App → From a manifest** を選び、
+   [`deploy/slack-app-manifest.json`](deploy/slack-app-manifest.json) を貼り付け
+   （Bot ユーザーと `files:write` / `chat:write` が設定済み）。
+   ※ 手動で作る場合は **OAuth & Permissions → Bot Token Scopes** に
+   `files:write`（および `chat:write`）を追加。
+2. **Install to Workspace** → 許可 → **Bot User OAuth Token**（`xoxb-…`）をコピー。
+3. 通知先チャンネルに **Bot を招待**（チャンネルで `/invite @wan-pulse`）。
+4. **チャンネル ID** を控える（チャンネル名クリック → 一番下に `C0123ABCD…`）。
 
 ```bash
 export WAN_PULSE_SLACK_BOT_TOKEN="xoxb-..."
