@@ -161,3 +161,25 @@ wan-pulse.toml
 # Downloaded models (fetch with scripts/download-yamnet.sh).
 models/*.tflite
 models/*.csv
+
+# --- macOS (dev machine) ---
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.fseventsd
+.DocumentRevisions-V100
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+Icon?
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
