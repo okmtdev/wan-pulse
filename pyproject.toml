@@ -20,6 +20,12 @@ dependencies = [
 dev = [
     "pytest>=7.0",
 ]
+# Inference stage (YAMNet via TFLite). ai-edge-litert ships wheels for both
+# macOS and Linux/ARM (Raspberry Pi). On the Pi you can alternatively use
+# `tflite-runtime`; on Mac the full `tensorflow` package also works.
+infer = [
+    "ai-edge-litert>=1.0.1",
+]
 
 [project.scripts]
 wan-pulse = "wan_pulse.cli:main"

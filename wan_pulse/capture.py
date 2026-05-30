@@ -15,6 +15,7 @@ from typing import Callable
 
 import numpy as np
 
+from .classify import Classifier
 from .config import CaptureConfig
 from .gate import EnergyGate, Segment, rms_dbfs
 from .writer import SegmentWriter
@@ -27,12 +28,18 @@ class Capture:
         self,
         config: CaptureConfig,
         *,
+        classifier: Classifier | None = None,
+        classify_config=None,
+        record: bool = True,
         on_segment: Callable[[Segment], None] | None = None,
         on_block: Callable[[float], None] | None = None,
     ) -> None:
         self.config = config
         self.gate = EnergyGate(config)
         self.writer = SegmentWriter(config.output_dir)
+        self._classifier = classifier
+        self._classify_config = classify_config
+        self._record = record
         self._on_segment = on_segment
         self._on_block = on_block
         self._queue: "queue.Queue[np.ndarray]" = queue.Queue()
@@ -54,13 +61,16 @@ class Capture:
             f"[wan-pulse] listening: {cfg.samplerate} Hz, {cfg.channels} ch, "
             f"block {cfg.block_ms:.0f} ms, threshold {cfg.threshold_db:.1f} dBFS"
         )
-        print(f"[wan-pulse] saving segments under ./{cfg.output_dir}/  (Ctrl+C to stop)")
+        if self._record:
+            print(f"[wan-pulse] saving segments under ./{cfg.output_dir}/  (Ctrl+C to stop)")
+            if self._classifier is not None:
+                backend = getattr(self._classifier, "backend", "")
+                print(f"[wan-pulse] classifying each segment ({backend})".replace(" ()", ""))
+            # Snapshot the effective settings so this batch is reproducible.
+            from .configfile import write_run_log
 
-        # Snapshot the effective settings so this batch of recordings is reproducible.
-        from .configfile import write_run_log
-
-        log_path = write_run_log(cfg)
-        print(f"[wan-pulse] run settings -> {log_path}")
+            log_path = write_run_log(cfg, classify=self._classify_config)
+            print(f"[wan-pulse] run settings -> {log_path}")
 
         stream = sd.InputStream(
             samplerate=cfg.samplerate,
@@ -99,18 +109,40 @@ class Capture:
     def _handle_block(self, block: np.ndarray) -> None:
         if self._on_block is not None:
             self._on_block(rms_dbfs(block))
-        self._emit(self.gate.process(block))
+        if self._record:
+            self._emit(self.gate.process(block))
 
     def _emit(self, segment: Segment | None) -> None:
         if segment is None:
             return
         path = self.writer.write(segment)
-        print(
+        line = (
             f"[wan-pulse] saved {path.name}  "
             f"({segment.duration_sec:.2f}s, peak {segment.peak_dbfs:.1f} dBFS)"
         )
+        if self._classifier is not None:
+            label = self._classify_segment(segment, path)
+            if label:
+                line += f"  -> {label}"
+        print(line)
         if self._on_segment is not None:
             self._on_segment(segment)
+
+    def _classify_segment(self, segment: Segment, wav_path) -> str:
+        """Run inference and drop a JSON sidecar. Never let it break capture."""
+        try:
+            result = self._classifier.classify(segment.audio, segment.samplerate)
+        except Exception as exc:  # noqa: BLE001 - keep recording even if inference fails
+            print(f"[wan-pulse] classify failed: {exc}", file=sys.stderr)
+            return ""
+        payload = {
+            "file": wav_path.name,
+            "duration_sec": round(segment.duration_sec, 3),
+            "peak_dbfs": round(segment.peak_dbfs, 2),
+            **result.to_dict(),
+        }
+        self.writer.write_sidecar(wav_path, payload)
+        return result.summary()
 
     def stop(self) -> None:
         self._stop.set()

@@ -31,9 +31,10 @@
 | `wan_pulse/configfile.py` | `wan-pulse.toml` の読み込み・優先順位のマージ・run ログ出力 |
 | `wan_pulse/ring_buffer.py` | 直近の音声を保持するリングバッファ（前マージン用の先読み） |
 | `wan_pulse/gate.py` | エネルギーゲート（無音→鳴った→無音 を区間として切り出す状態機械） |
-| `wan_pulse/writer.py` | 区間を日付フォルダ配下の `.wav` に保存（ファイル名に peak dBFS） |
-| `wan_pulse/capture.py` | sounddevice ストリーム → ゲート → 保存 を繋ぐ実行ループ |
-| `wan_pulse/cli.py` | `init` / `devices` / `monitor` / `run` の各コマンド |
+| `wan_pulse/writer.py` | 区間を日付フォルダ配下の `.wav` に保存（ファイル名に peak dBFS）＋推論結果の JSON サイドカー |
+| `wan_pulse/capture.py` | sounddevice ストリーム → ゲート → 保存 →（任意）推論 を繋ぐ実行ループ |
+| `wan_pulse/classify.py` | YAMNet(TFLite) で「犬か／発声タイプ」を推論（任意・Mac/RPi 共通） |
+| `wan_pulse/cli.py` | `init` / `devices` / `monitor` / `run` / `classify` の各コマンド |
 | `tests/` | マイク不要のロジックテスト（合成波形で検証） |
 
 音声処理（`gate.py` / `ring_buffer.py`）は **音声 I/O から完全に分離**してあります。
@@ -254,6 +255,75 @@ wan-pulse run                  # 再起動
 
 ---
 
+## 推論（犬判定・発声タイプ）※任意
+
+保存した区間に対して「犬か？ どんな発声か（吠え／唸り／クンクン…）」を推論する
+ステージです。**YAMNet（AudioSet 521 クラス）を TFLite で** 動かします。
+
+- YAMNet の入力は **16kHz・モノ・float32** ＝ capture の出力そのままで前処理不要。
+- TFLite は **Mac でも RPi でも同一 API**。バックエンドだけ環境で differ するので、
+  **同じモデル・同じコードで両方エッジ推論**できます（開発＝本番）。
+- 推論は「鳴った時だけ」走る重い処理。依存は**任意インストール**で、入れなければ
+  これまで通り録音のみで動きます。
+
+> ⚠️ これは「感情」ではなく **AudioSet のクラス**を出します。`Dog/Bark/Howl/Growling/
+> Whimper(dog)…` を拾って「犬らしさ＋発声タイプ」を返す、感情ステージの土台です。
+
+### セットアップ
+
+```bash
+# 1) 推論用の依存（Mac/RPi 共通。RPi は tflite-runtime でも可）
+pip install -e ".[infer]"
+
+# 2) モデルとラベルを取得（./models/ に保存）
+./scripts/download-yamnet.sh
+```
+
+> モデル URL が移動していた場合は、[Kaggle Models の YAMNet (TFLite)](https://www.kaggle.com/models/google/yamnet/tfLite)
+> から `.tflite` を落として `models/yamnet.tflite` に置けば OK です。
+
+### 使い方
+
+**オンライン（録音と同時に推論）** ── `wan-pulse.toml` の `[classify]` で `enabled = true`、
+または `--classify` フラグ:
+
+```bash
+wan-pulse run --classify
+```
+
+```
+[wan-pulse] classifying each segment (ai_edge_litert.interpreter)
+[wan-pulse] saved bark_20260530_171500_999_peak-12.3dBFS.wav  (1.56s, peak -12.3 dBFS)  -> Bark 0.82 [dog:Bark 0.82]
+```
+
+`.wav` の隣に同名の `.json`（サイドカー）が出ます:
+
+```json
+{ "file": "bark_...wav", "top_label": "Bark", "top_score": 0.82,
+  "is_dog": true, "dog_label": "Bark", "dog_score": 0.82,
+  "top_k": [["Bark", 0.82], ["Dog", 0.41], ...], "backend": "..." }
+```
+
+**オフライン（保存済み wav を後から／マイク無しの Mac で試す）**:
+
+```bash
+wan-pulse classify recordings/2026-05-30/bark_*.wav
+wan-pulse classify some.wav --write-sidecar   # JSON も書き出す
+```
+
+### `[classify]` の設定（`wan-pulse.toml`）
+
+```toml
+[classify]
+enabled = true                              # run --classify と同等
+model_path = "models/yamnet.tflite"
+labels_path = "models/yamnet_class_map.csv"
+dog_threshold = 0.3                          # 犬クラスのスコアがこれ以上で is_dog=true
+top_k = 5                                     # サイドカーに残す上位ラベル数
+```
+
+---
+
 ## テスト
 
 マイク不要で、合成波形を使ってエネルギーゲートとリングバッファを検証します
@@ -266,10 +336,12 @@ pytest
 
 ---
 
-## 今後の予定（このリポジトリの範囲外）
+## 今後の予定
 
-- 保存した `.wav` を入力に、犬かどうか／感情を推論する **モデル推論**
-- 推論結果の **記録・通知**
+- ✅ **犬判定／発声タイプの推論**（YAMNet・上記「推論」セクション）
+- ⬜ **ラベル付けの回し**: 保存 wav とサイドカーをレビューして「犬/非犬・タイプ」を
+  蓄積し、自前データを作る
+- ⬜ **感情推論**: まずは発声タイプ → 粗い状態のルール対応、データが貯まったら自前学習
+- ⬜ 推論結果の **記録・通知**（DB/Slack 等）
 
-骨組みは整っているので、`Capture(on_segment=...)` のコールバックに推論処理を
-差し込めば、保存と同時に推論を走らせる形に拡張できます。
+推論結果は `on_segment` で即時に得られるので、通知や記録はこのフックに足せます。

@@ -158,3 +158,6 @@ env/
 recordings/
 # Local tuning config (device/threshold differ per machine: Mac dev vs RPi prod).
 wan-pulse.toml
+# Downloaded models (fetch with scripts/download-yamnet.sh).
+models/*.tflite
+models/*.csv

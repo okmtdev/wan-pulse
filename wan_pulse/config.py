@@ -75,3 +75,35 @@ class CaptureConfig:
             raise ValueError("min_segment_sec must be non-negative")
         if self.max_segment_sec <= 0:
             raise ValueError("max_segment_sec must be positive")
+
+
+@dataclass
+class ClassifyConfig:
+    """Settings for the (optional) inference stage that labels each segment.
+
+    Inference is off by default so the core capture skeleton runs without the
+    heavy ML dependencies. The same model file and code path run on both macOS
+    (dev) and the Raspberry Pi (prod) via a TFLite interpreter.
+    """
+
+    enabled: bool = False
+    """Run the classifier on each saved segment (online, in `on_segment`)."""
+
+    model_path: str = "models/yamnet.tflite"
+    """Path to the YAMNet TFLite model (see scripts/download-yamnet.sh)."""
+
+    labels_path: str = "models/yamnet_class_map.csv"
+    """Path to the AudioSet class-map CSV (index,mid,display_name)."""
+
+    dog_threshold: float = 0.3
+    """A segment is flagged as a dog when the best dog-class score is >= this."""
+
+    top_k: int = 5
+    """How many top labels to keep in the per-segment sidecar JSON."""
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.dog_threshold <= 1.0:
+            raise ValueError("dog_threshold must be in [0, 1]")
+        if self.top_k < 1:
+            raise ValueError("top_k must be >= 1")
+

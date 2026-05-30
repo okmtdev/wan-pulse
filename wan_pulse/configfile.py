@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .config import CaptureConfig
+from .config import CaptureConfig, ClassifyConfig
 
 try:  # Python 3.11+
     import tomllib as _toml
@@ -30,6 +30,18 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on 3.9/3.10
 
 
 DEFAULT_CONFIG_NAME = "wan-pulse.toml"
+
+# Inference settings live under a [classify] table so they're clearly separate
+# from the audio-capture keys.
+CLASSIFY_TABLE = "classify"
+
+_CLASSIFY_COMMENTS: dict[str, str] = {
+    "enabled": "true で保存区間を推論(犬か/発声タイプ)。要 .[infer] とモデル",
+    "model_path": "YAMNet TFLite モデル (scripts/download-yamnet.sh)",
+    "labels_path": "AudioSet クラスマップ CSV",
+    "dog_threshold": "犬クラスのスコアがこれ以上で「犬」と判定",
+    "top_k": "サイドカー JSON に残す上位ラベル数",
+}
 
 # Per-field inline comments used when rendering the template / run log.
 _FIELD_COMMENTS: dict[str, str] = {
@@ -60,16 +72,10 @@ def _toml_value(value: Any) -> str:
     return json.dumps(str(value))
 
 
-def render_toml(config: CaptureConfig, *, header_lines: list[str] | None = None) -> str:
-    """Render a CaptureConfig as a commented TOML document."""
+def _render_fields(config: Any, comments: dict[str, str]) -> list[str]:
     lines: list[str] = []
-    for line in header_lines or []:
-        lines.append(f"# {line}")
-    if header_lines:
-        lines.append("")
-
     for field in dataclasses.fields(config):
-        comment = _FIELD_COMMENTS.get(field.name, "")
+        comment = comments.get(field.name, "")
         value = getattr(config, field.name)
         suffix = f"  # {comment}" if comment else ""
         if value is None:
@@ -77,6 +83,28 @@ def render_toml(config: CaptureConfig, *, header_lines: list[str] | None = None)
             lines.append(f"# {field.name} =   # {comment}".rstrip())
         else:
             lines.append(f"{field.name} = {_toml_value(value)}{suffix}")
+    return lines
+
+
+def render_toml(
+    config: CaptureConfig,
+    *,
+    header_lines: list[str] | None = None,
+    classify: ClassifyConfig | None = None,
+) -> str:
+    """Render a CaptureConfig (and optional [classify] table) as commented TOML."""
+    lines: list[str] = []
+    for line in header_lines or []:
+        lines.append(f"# {line}")
+    if header_lines:
+        lines.append("")
+
+    lines.extend(_render_fields(config, _FIELD_COMMENTS))
+
+    if classify is not None:
+        lines.append("")
+        lines.append(f"[{CLASSIFY_TABLE}]")
+        lines.extend(_render_fields(classify, _CLASSIFY_COMMENTS))
     return "\n".join(lines) + "\n"
 
 
@@ -89,7 +117,7 @@ def template_toml() -> str:
         "チューニングのコツ: まず threshold_db を低め(全部録る)にして起動し、",
         "保存された .wav のファイル名にある peak(dBFS) を見て徐々に上げていく。",
     ]
-    return render_toml(config, header_lines=header)
+    return render_toml(config, header_lines=header, classify=ClassifyConfig())
 
 
 def find_config(explicit: str | None) -> Path | None:
@@ -100,19 +128,40 @@ def find_config(explicit: str | None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def load_file_values(path: Path | None) -> dict[str, Any]:
-    """Read known CaptureConfig fields from a TOML file (empty dict if None)."""
+def _read_toml(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
     if not path.is_file():
         raise FileNotFoundError(f"config file not found: {path}")
     with path.open("rb") as fh:
-        data = _toml.load(fh)
+        return _toml.load(fh)
+
+
+def load_file_values(path: Path | None) -> dict[str, Any]:
+    """Read known CaptureConfig fields from a TOML file (empty dict if None).
+
+    The optional [classify] table is ignored here (read by load_classify_values).
+    """
+    data = _read_toml(path)
     valid = {f.name for f in dataclasses.fields(CaptureConfig)}
-    unknown = set(data) - valid
+    unknown = set(data) - valid - {CLASSIFY_TABLE}
     if unknown:
         raise ValueError(f"unknown config keys in {path}: {', '.join(sorted(unknown))}")
     return {k: v for k, v in data.items() if k in valid}
+
+
+def load_classify_values(path: Path | None) -> dict[str, Any]:
+    """Read the [classify] table from a TOML file (empty dict if absent)."""
+    table = _read_toml(path).get(CLASSIFY_TABLE, {})
+    if not isinstance(table, dict):
+        raise ValueError(f"[{CLASSIFY_TABLE}] must be a table in {path}")
+    valid = {f.name for f in dataclasses.fields(ClassifyConfig)}
+    unknown = set(table) - valid
+    if unknown:
+        raise ValueError(
+            f"unknown [{CLASSIFY_TABLE}] keys in {path}: {', '.join(sorted(unknown))}"
+        )
+    return {k: v for k, v in table.items() if k in valid}
 
 
 def resolve_config(
@@ -124,7 +173,21 @@ def resolve_config(
     return dataclasses.replace(base, **applied) if applied else base
 
 
-def write_run_log(config: CaptureConfig, *, when: _dt.datetime | None = None) -> Path:
+def resolve_classify(
+    file_values: dict[str, Any], cli_overrides: dict[str, Any]
+) -> ClassifyConfig:
+    """Same precedence as resolve_config, for the inference settings."""
+    base = ClassifyConfig(**file_values)
+    applied = {k: v for k, v in cli_overrides.items() if v is not None}
+    return dataclasses.replace(base, **applied) if applied else base
+
+
+def write_run_log(
+    config: CaptureConfig,
+    *,
+    classify: ClassifyConfig | None = None,
+    when: _dt.datetime | None = None,
+) -> Path:
     """Drop a TOML snapshot of the effective config under the output dir."""
     when = when or _dt.datetime.now()
     out_dir = Path(config.output_dir)
@@ -135,5 +198,7 @@ def write_run_log(config: CaptureConfig, *, when: _dt.datetime | None = None) ->
         "この run で実際に使われた設定のスナップショット(再現用)。",
         "良い値が見つかったら wan-pulse.toml にコピーして使い回せます。",
     ]
-    path.write_text(render_toml(config, header_lines=header), encoding="utf-8")
+    path.write_text(
+        render_toml(config, header_lines=header, classify=classify), encoding="utf-8"
+    )
     return path

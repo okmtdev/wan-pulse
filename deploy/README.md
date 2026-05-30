@@ -14,6 +14,7 @@
 2. venv にインストール済み（推奨）:
    ```bash
    python3 -m venv .venv && .venv/bin/pip install -e .
+   # 推論も使うなら（任意）: .venv/bin/pip install -e '.[infer]' && ./scripts/download-yamnet.sh
    ```
 3. 設定を済ませる:
    ```bash

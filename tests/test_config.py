@@ -65,3 +65,38 @@ def test_run_log_handles_none_device(tmp_path):
     values = configfile.load_file_values(path)
     # device is None -> rendered as a comment -> absent on reload.
     assert "device" not in values
+
+
+def test_classify_table_parsed_separately(tmp_path):
+    path = tmp_path / "wan-pulse.toml"
+    path.write_text(
+        'threshold_db = -30.0\n\n[classify]\nenabled = true\ndog_threshold = 0.5\n',
+        encoding="utf-8",
+    )
+    # The [classify] table must not trip the audio-key validator...
+    audio = configfile.load_file_values(path)
+    assert audio["threshold_db"] == -30.0 and "classify" not in audio
+    # ...and is read by the dedicated loader.
+    classify = configfile.load_classify_values(path)
+    assert classify == {"enabled": True, "dog_threshold": 0.5}
+
+
+def test_resolve_classify_precedence():
+    from wan_pulse.config import ClassifyConfig
+
+    cfg = configfile.resolve_classify(
+        {"enabled": True, "dog_threshold": 0.5},
+        {"dog_threshold": 0.2, "model_path": None},
+    )
+    assert cfg.enabled is True            # from file
+    assert cfg.dog_threshold == 0.2       # CLI override
+    assert cfg.model_path == ClassifyConfig.model_path  # default
+
+
+def test_template_includes_classify_table(tmp_path):
+    path = tmp_path / configfile.DEFAULT_CONFIG_NAME
+    path.write_text(configfile.template_toml(), encoding="utf-8")
+    assert "[classify]" in path.read_text()
+    # Template must round-trip through both loaders.
+    configfile.load_file_values(path)
+    assert configfile.load_classify_values(path)["enabled"] is False

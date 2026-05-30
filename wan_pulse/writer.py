@@ -11,6 +11,7 @@ Example: ``bark_20260530_071530_812_peak-11.3dBFS.wav``
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import math
 from pathlib import Path
 
@@ -47,5 +48,12 @@ class SegmentWriter:
         audio = np.asarray(segment.audio, dtype=np.float32)
         # soundfile expects shape (frames,) or (frames, channels).
         sf.write(path, audio, segment.samplerate, subtype="PCM_16")
+        return path
+
+    @staticmethod
+    def write_sidecar(wav_path: Path, data: dict) -> Path:
+        """Write a JSON sidecar next to a .wav (e.g. classification result)."""
+        path = wav_path.with_suffix(".json")
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
