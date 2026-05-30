@@ -48,8 +48,10 @@ _CLASSIFY_COMMENTS: dict[str, str] = {
 _NOTIFY_COMMENTS: dict[str, str] = {
     "enabled": "true で犬検知時に Slack 通知(要 classify 有効)",
     "webhook_env": "Slack Webhook URL を入れる環境変数名(テキストのみ)",
+    "webhook_url": "Webhook URL を直接書く場合ここに(env より優先/秘密・run ログでは伏字)",
     "attach_audio": "true で .wav も送る(Webhookではなく Bot トークン必須)",
     "bot_token_env": "Slack Bot トークン(xoxb-)を入れる環境変数名",
+    "bot_token": "Bot トークンを直接書く場合ここに(env より優先/秘密)",
     "channel": "音声をアップするチャンネルID(例 C0123ABCD)。attach_audio時に必須",
     "only_dog": "犬と判定された区間だけ通知",
     "min_dog_score": "犬スコアがこれ以上のときだけ通知",
@@ -61,6 +63,7 @@ _HISTORY_COMMENTS: dict[str, str] = {
     "backend": "'gsheet'(Google Sheets/Apps Script) か 'csv'(ローカル)",
     "csv_path": "backend='csv' のときの出力先",
     "webhook_env": "backend='gsheet' のとき Apps Script Web App URL を入れる環境変数名",
+    "webhook_url": "Apps Script URL を直接書く場合ここに(env より優先/秘密・run ログでは伏字)",
     "only_dog": "true で犬と判定された区間だけ記録(既定は全部)",
 }
 
@@ -94,11 +97,18 @@ def _toml_value(value: Any) -> str:
     return json.dumps(str(value))
 
 
+# Field names that hold secrets: their values are redacted when a config is
+# rendered to TOML (so run-log snapshots never leak a URL/token).
+_SECRET_FIELDS = {"webhook_url", "bot_token"}
+
+
 def _render_fields(config: Any, comments: dict[str, str]) -> list[str]:
     lines: list[str] = []
     for field in dataclasses.fields(config):
         comment = comments.get(field.name, "")
         value = getattr(config, field.name)
+        if field.name in _SECRET_FIELDS and value:
+            value = "***"  # never write the real secret into a snapshot
         suffix = f"  # {comment}" if comment else ""
         if value is None:
             # TOML has no null; leave it commented so the default (None) applies.

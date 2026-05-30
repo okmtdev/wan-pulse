@@ -127,11 +127,19 @@ class NotifyConfig:
     webhook_env: str = "WAN_PULSE_SLACK_WEBHOOK"
     """Name of the env var holding the Slack Incoming Webhook URL (text only)."""
 
+    webhook_url: str = ""
+    """The Slack webhook URL written directly (overrides webhook_env). Secret:
+    redacted in the run-log snapshot. Prefer the env var for shared setups."""
+
     attach_audio: bool = False
     """Upload the .wav itself (needs a bot token + channel, not a webhook)."""
 
     bot_token_env: str = "WAN_PULSE_SLACK_BOT_TOKEN"
     """Name of the env var holding the Slack bot token (xoxb-...) for uploads."""
+
+    bot_token: str = ""
+    """The Slack bot token written directly (overrides bot_token_env). Secret:
+    redacted in the run-log snapshot."""
 
     channel: str = ""
     """Channel ID (e.g. C0123ABCD) to upload the audio to. Required for uploads."""
@@ -168,6 +176,10 @@ class HistoryConfig:
 
     webhook_env: str = "WAN_PULSE_SHEET_WEBHOOK"
     """Env var holding the Apps Script web-app URL when backend = 'gsheet'."""
+
+    webhook_url: str = ""
+    """The Apps Script URL written directly (overrides webhook_env). Secret:
+    redacted in the run-log snapshot."""
 
     only_dog: bool = False
     """If true, only log segments classified as a dog (default: log all)."""

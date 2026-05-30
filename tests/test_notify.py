@@ -130,3 +130,16 @@ def test_load_notifier_picks_transport(monkeypatch):
     monkeypatch.setenv("WP_HOOK", "http://hook")
     cfg3 = NotifyConfig(enabled=True, webhook_env="WP_HOOK")
     assert isinstance(load_notifier(cfg3), SlackNotifier)
+
+
+def test_direct_secret_in_config_overrides_env(monkeypatch):
+    # webhook_url written directly wins over (and works without) the env var.
+    monkeypatch.delenv("WP_HOOK", raising=False)
+    n = load_notifier(NotifyConfig(enabled=True, webhook_env="WP_HOOK",
+                                   webhook_url="http://direct"))
+    assert isinstance(n, SlackNotifier) and n.webhook_url == "http://direct"
+
+    # bot_token written directly works for the file notifier.
+    fn = load_notifier(NotifyConfig(enabled=True, attach_audio=True,
+                                    bot_token="xoxb-direct", channel="C1"))
+    assert isinstance(fn, SlackFileNotifier) and fn.token == "xoxb-direct"

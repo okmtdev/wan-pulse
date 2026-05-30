@@ -375,7 +375,13 @@ top_k = 5                                     # サイドカーに残す上位�
 - **B. 音声も送る（Bot トークン + ファイルアップロード）** — `.wav` を Slack に上げて
   **その場で鳴き声を再生**できる。少しだけ設定が増える。
 
-秘密情報（Webhook URL / Bot トークン）は設定ファイルではなく**環境変数**で渡します。
+秘密情報（Webhook URL / Bot トークン / Sheets URL）は **環境変数**で渡すのが基本ですが、
+**`wan-pulse.toml` に直接書く**こともできます（`webhook_url` / `bot_token` など）。直接値が
+あれば環境変数より優先されます。
+
+> `wan-pulse.toml` は `.gitignore` 済みで、**run ログのスナップショット（`runs/*.toml`）では
+> 秘密は `"***"` に伏字**にして書き出すので、設定ファイルに直書きしても漏れません。
+> ただし共有・コミットする運用なら環境変数の方が安全です。
 
 ### A. テキストのみ（Webhook）
 
@@ -398,6 +404,7 @@ only_dog = true           # 犬と判定された時だけ通知
 min_dog_score = 0.0       # 犬スコアの下限（厳しくしたいなら上げる）
 cooldown_sec = 30.0       # 連続通知の最小間隔（鳴き続けても spam しない）
 webhook_env = "WAN_PULSE_SLACK_WEBHOOK"
+# webhook_url = "https://hooks.slack.com/services/..."  # ← env の代わりに直書きも可（任意）
 ```
 
 届く通知:

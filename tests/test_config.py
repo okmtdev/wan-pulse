@@ -54,6 +54,20 @@ def test_run_log_roundtrips(tmp_path):
     path = configfile.write_run_log(config)
     assert path.exists() and path.suffix == ".toml"
     assert path.parent == tmp_path  # written to run_log_dir, not output_dir
+
+
+def test_run_log_redacts_secrets(tmp_path):
+    from wan_pulse.config import NotifyConfig, HistoryConfig
+
+    config = CaptureConfig(run_log_dir=str(tmp_path))
+    notify = NotifyConfig(webhook_url="https://hooks.slack.com/services/SECRET",
+                          bot_token="xoxb-SECRET")
+    history = HistoryConfig(webhook_url="https://script.google.com/SECRET")
+    path = configfile.write_run_log(config, notify=notify, history=history)
+    text = path.read_text()
+    assert "SECRET" not in text          # real secrets never hit the snapshot
+    assert 'webhook_url = "***"' in text
+    assert 'bot_token = "***"' in text
     # The snapshot must parse back into an equivalent config.
     values = configfile.load_file_values(path)
     assert values["threshold_db"] == -37.5

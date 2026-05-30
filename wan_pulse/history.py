@@ -117,14 +117,18 @@ class SheetWebhookRecorder(HistoryRecorder):
 
 
 def load_recorder(config: HistoryConfig) -> HistoryRecorder:
-    """Build the configured recorder (secret URL via env for the gsheet backend)."""
+    """Build the configured recorder.
+
+    For the gsheet backend the URL may be set directly in config (history.webhook_url)
+    or via its env var; the direct value wins.
+    """
     common = dict(only_dog=config.only_dog)
     if config.backend == "csv":
         return CsvRecorder(config.csv_path, **common)
-    url = os.environ.get(config.webhook_env, "").strip()
+    url = config.webhook_url.strip() or os.environ.get(config.webhook_env, "").strip()
     if not url:
         raise ValueError(
-            f"Sheet web-app URL not set. Export it, e.g. "
+            f"Sheet web-app URL not set. Set history.webhook_url or "
             f"`export {config.webhook_env}=https://script.google.com/macros/s/.../exec`"
         )
     return SheetWebhookRecorder(url, **common)

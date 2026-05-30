@@ -194,28 +194,37 @@ class SlackFileNotifier(_BaseSlackNotifier):
         self._uploader(self.token, self.channel, Path(wav_path), caption)
 
 
+def _secret(direct: str, env_name: str) -> str:
+    """Prefer a value written directly in config; else read the env var."""
+    return direct.strip() or os.environ.get(env_name, "").strip()
+
+
 def load_notifier(config: NotifyConfig) -> Notifier:
-    """Build the right notifier from config + environment (secrets via env)."""
+    """Build the right notifier from config + environment.
+
+    The secret (webhook URL / bot token) may be set directly in the config or
+    via its env var; the direct value wins.
+    """
     common = dict(
         only_dog=config.only_dog,
         min_dog_score=config.min_dog_score,
         cooldown_sec=config.cooldown_sec,
     )
     if config.attach_audio:
-        token = os.environ.get(config.bot_token_env, "").strip()
+        token = _secret(config.bot_token, config.bot_token_env)
         if not token:
             raise ValueError(
-                f"attach_audio=true needs a bot token. Export it, e.g. "
+                f"attach_audio=true needs a bot token. Set notify.bot_token or "
                 f"`export {config.bot_token_env}=xoxb-...`"
             )
         if not config.channel:
             raise ValueError("attach_audio=true needs a channel ID (notify.channel = \"C0123...\")")
         return SlackFileNotifier(token, config.channel, **common)
 
-    url = os.environ.get(config.webhook_env, "").strip()
+    url = _secret(config.webhook_url, config.webhook_env)
     if not url:
         raise ValueError(
-            f"Slack webhook URL not set. Export it, e.g. "
+            f"Slack webhook URL not set. Set notify.webhook_url or "
             f"`export {config.webhook_env}=https://hooks.slack.com/services/...`"
         )
     return SlackNotifier(url, **common)
