@@ -116,6 +116,25 @@ def _build_notifier(notify_config):
         return None
 
 
+def _resolve_history(args: argparse.Namespace):
+    """Build the HistoryConfig: defaults < [history] table < CLI flags."""
+    config_path = configfile.find_config(getattr(args, "config", None))
+    file_values = configfile.load_history_values(config_path)
+    overrides = {"enabled": getattr(args, "history", None)}
+    return configfile.resolve_history(file_values, overrides)
+
+
+def _build_recorder(history_config):
+    """Instantiate the history recorder, warning (not failing) if misconfigured."""
+    from .history import load_recorder
+
+    try:
+        return load_recorder(history_config)
+    except ValueError as exc:
+        log.warning("[wan-pulse] history disabled: %s", exc)
+        return None
+
+
 def _build_classifier(classify_config):
     """Instantiate the classifier, with a friendly error on missing deps/model."""
     from .classify import load_classifier
@@ -175,6 +194,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     config = _resolve(args)
     classify_config = _resolve_classify(args)
     notify_config = _resolve_notify(args)
+    history_config = _resolve_history(args)
 
     classifier = None
     if classify_config.enabled:
@@ -189,12 +209,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         else:
             notifier = _build_notifier(notify_config)
 
+    recorder = None
+    if history_config.enabled:
+        if classifier is None:
+            log.warning("[wan-pulse] history requires classify; enable [classify] too.")
+        else:
+            recorder = _build_recorder(history_config)
+
     Capture(
         config,
         classifier=classifier,
         classify_config=classify_config,
         notifier=notifier,
         notify_config=notify_config,
+        recorder=recorder,
+        history_config=history_config,
     ).run()
     return 0
 
@@ -263,6 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--attach-audio", dest="attach_audio",
                        action=argparse.BooleanOptionalAction, default=None,
                        help="upload the .wav too (needs a Slack bot token + channel)")
+    p_run.add_argument("--history", action=argparse.BooleanOptionalAction, default=None,
+                       help="log each detection to the history sheet/CSV (--no-history to disable)")
     _add_classify_args(p_run)
     _add_log_args(p_run)
     p_run.set_defaults(func=cmd_run)

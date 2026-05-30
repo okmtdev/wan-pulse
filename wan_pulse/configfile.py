@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .config import CaptureConfig, ClassifyConfig, NotifyConfig
+from .config import CaptureConfig, ClassifyConfig, HistoryConfig, NotifyConfig
 
 try:  # Python 3.11+
     import tomllib as _toml
@@ -35,6 +35,7 @@ DEFAULT_CONFIG_NAME = "wan-pulse.toml"
 # clearly separate from the audio-capture keys.
 CLASSIFY_TABLE = "classify"
 NOTIFY_TABLE = "notify"
+HISTORY_TABLE = "history"
 
 _CLASSIFY_COMMENTS: dict[str, str] = {
     "enabled": "true で保存区間を推論(犬か/発声タイプ)。要 .[infer] とモデル",
@@ -53,6 +54,14 @@ _NOTIFY_COMMENTS: dict[str, str] = {
     "only_dog": "犬と判定された区間だけ通知",
     "min_dog_score": "犬スコアがこれ以上のときだけ通知",
     "cooldown_sec": "連続通知の最小間隔(秒)。鳴き続けても spam しない",
+}
+
+_HISTORY_COMMENTS: dict[str, str] = {
+    "enabled": "true で検知履歴を1行ずつ記録(要 classify 有効)",
+    "backend": "'gsheet'(Google Sheets/Apps Script) か 'csv'(ローカル)",
+    "csv_path": "backend='csv' のときの出力先",
+    "webhook_env": "backend='gsheet' のとき Apps Script Web App URL を入れる環境変数名",
+    "only_dog": "true で犬と判定された区間だけ記録(既定は全部)",
 }
 
 # Per-field inline comments used when rendering the template / run log.
@@ -105,8 +114,9 @@ def render_toml(
     header_lines: list[str] | None = None,
     classify: ClassifyConfig | None = None,
     notify: NotifyConfig | None = None,
+    history: HistoryConfig | None = None,
 ) -> str:
-    """Render a CaptureConfig (+ optional [classify]/[notify] tables) as TOML."""
+    """Render a CaptureConfig (+ optional [classify]/[notify]/[history]) as TOML."""
     lines: list[str] = []
     for line in header_lines or []:
         lines.append(f"# {line}")
@@ -115,14 +125,15 @@ def render_toml(
 
     lines.extend(_render_fields(config, _FIELD_COMMENTS))
 
-    if classify is not None:
-        lines.append("")
-        lines.append(f"[{CLASSIFY_TABLE}]")
-        lines.extend(_render_fields(classify, _CLASSIFY_COMMENTS))
-    if notify is not None:
-        lines.append("")
-        lines.append(f"[{NOTIFY_TABLE}]")
-        lines.extend(_render_fields(notify, _NOTIFY_COMMENTS))
+    for name, cfg, comments in (
+        (CLASSIFY_TABLE, classify, _CLASSIFY_COMMENTS),
+        (NOTIFY_TABLE, notify, _NOTIFY_COMMENTS),
+        (HISTORY_TABLE, history, _HISTORY_COMMENTS),
+    ):
+        if cfg is not None:
+            lines.append("")
+            lines.append(f"[{name}]")
+            lines.extend(_render_fields(cfg, comments))
     return "\n".join(lines) + "\n"
 
 
@@ -136,7 +147,8 @@ def template_toml() -> str:
         "保存された .wav のファイル名にある peak(dBFS) を見て徐々に上げていく。",
     ]
     return render_toml(
-        config, header_lines=header, classify=ClassifyConfig(), notify=NotifyConfig()
+        config, header_lines=header,
+        classify=ClassifyConfig(), notify=NotifyConfig(), history=HistoryConfig(),
     )
 
 
@@ -164,7 +176,7 @@ def load_file_values(path: Path | None) -> dict[str, Any]:
     """
     data = _read_toml(path)
     valid = {f.name for f in dataclasses.fields(CaptureConfig)}
-    unknown = set(data) - valid - {CLASSIFY_TABLE, NOTIFY_TABLE}
+    unknown = set(data) - valid - {CLASSIFY_TABLE, NOTIFY_TABLE, HISTORY_TABLE}
     if unknown:
         raise ValueError(f"unknown config keys in {path}: {', '.join(sorted(unknown))}")
     return {k: v for k, v in data.items() if k in valid}
@@ -189,6 +201,11 @@ def load_classify_values(path: Path | None) -> dict[str, Any]:
 def load_notify_values(path: Path | None) -> dict[str, Any]:
     """Read the [notify] table from a TOML file (empty dict if absent)."""
     return _load_table(path, NOTIFY_TABLE, NotifyConfig)
+
+
+def load_history_values(path: Path | None) -> dict[str, Any]:
+    """Read the [history] table from a TOML file (empty dict if absent)."""
+    return _load_table(path, HISTORY_TABLE, HistoryConfig)
 
 
 def resolve_config(
@@ -218,11 +235,21 @@ def resolve_notify(
     return dataclasses.replace(base, **applied) if applied else base
 
 
+def resolve_history(
+    file_values: dict[str, Any], cli_overrides: dict[str, Any]
+) -> HistoryConfig:
+    """Same precedence as resolve_config, for the history settings."""
+    base = HistoryConfig(**file_values)
+    applied = {k: v for k, v in cli_overrides.items() if v is not None}
+    return dataclasses.replace(base, **applied) if applied else base
+
+
 def write_run_log(
     config: CaptureConfig,
     *,
     classify: ClassifyConfig | None = None,
     notify: NotifyConfig | None = None,
+    history: HistoryConfig | None = None,
     when: _dt.datetime | None = None,
 ) -> Path:
     """Drop a TOML snapshot of the effective config under the output dir."""
@@ -236,7 +263,10 @@ def write_run_log(
         "良い値が見つかったら wan-pulse.toml にコピーして使い回せます。",
     ]
     path.write_text(
-        render_toml(config, header_lines=header, classify=classify, notify=notify),
+        render_toml(
+            config, header_lines=header,
+            classify=classify, notify=notify, history=history,
+        ),
         encoding="utf-8",
     )
     return path

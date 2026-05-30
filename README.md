@@ -457,6 +457,77 @@ Environment=WAN_PULSE_SLACK_BOT_TOKEN=xoxb-...
 
 ---
 
+## 検知履歴をスプレッドシートに蓄積 ※任意
+
+検知のたびに 1 行ずつ履歴を残します（推論＝`[classify]` 有効が前提）。バックエンドは 2 つ:
+
+- **A. Google スプレッドシート**（Apps Script の Web App に POST → 行を追記）
+- **B. ローカル CSV**（ゼロ設定・オフライン可。Excel/Sheets で開ける）
+
+記録される列:
+
+```
+timestamp, file, duration_sec, peak_dbfs, is_dog, dog_label, dog_score,
+emotion, emotion_basis, emotion_score, top_label, top_score
+```
+
+### A. Google スプレッドシート
+
+1. 新規スプレッドシートを作成 → メニュー **拡張機能 → Apps Script**。
+2. 以下を貼り付けて保存:
+
+   ```javascript
+   function doPost(e) {
+     var ss = SpreadsheetApp.getActiveSpreadsheet();
+     var sheet = ss.getSheetByName('detections') || ss.insertSheet('detections');
+     var cols = ['timestamp','file','duration_sec','peak_dbfs','is_dog','dog_label',
+                 'dog_score','emotion','emotion_basis','emotion_score','top_label','top_score'];
+     if (sheet.getLastRow() === 0) sheet.appendRow(cols);
+     var d = JSON.parse(e.postData.contents);
+     sheet.appendRow(cols.map(function (c) { return d[c]; }));
+     return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+                          .setMimeType(ContentService.MimeType.JSON);
+   }
+   ```
+
+3. **デプロイ → 新しいデプロイ → 種類「ウェブアプリ」**。
+   「次のユーザーとして実行: 自分」「アクセスできるユーザー: 全員」→ デプロイ。
+4. 表示される **ウェブアプリ URL**（`https://script.google.com/macros/s/.../exec`）をコピー。
+
+```bash
+export WAN_PULSE_SHEET_WEBHOOK="https://script.google.com/macros/s/XXXX/exec"
+wan-pulse run --classify --history
+```
+
+```toml
+[history]
+enabled = true                              # run --history と同等
+backend = "gsheet"
+webhook_env = "WAN_PULSE_SHEET_WEBHOOK"     # Apps Script URL を入れた環境変数名
+only_dog = false                            # true で犬だけ記録（既定は全部）
+```
+
+> URL を知っていれば誰でも書き込めるタイプなので、URL は秘密として扱ってください
+> （環境変数で渡す）。
+
+### B. ローカル CSV（設定不要）
+
+```toml
+[history]
+enabled = true
+backend = "csv"
+csv_path = "history/detections.csv"   # ここに追記（gitignore 済み）
+```
+
+```bash
+wan-pulse run --classify --history
+```
+
+ヘッダー付きで追記され、そのまま Excel / Google スプレッドシートに取り込めます。
+（Mac でのお試しにも便利。`history/` は git 管理外）
+
+---
+
 ## テスト
 
 マイク不要で、合成波形を使ってエネルギーゲートとリングバッファを検証します
@@ -477,6 +548,6 @@ pytest
   蓄積し、自前データを作る
 - ⬜ **感情推論（本番版）**: 貯めたデータで学習／ルールの精度検証
 - ✅ **通知**: 犬検知で Slack へ（上記「Slack 通知」セクション）
-- ⬜ **記録**: 検知履歴を DB やスプレッドシートに蓄積（任意）
+- ✅ **記録**: 検知履歴を Google スプレッドシート / CSV に蓄積（上記セクション）
 
 推論結果は分類ワーカーで得られるので、別の通知先（LINE/メール等）も同じフックに足せます。

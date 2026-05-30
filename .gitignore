@@ -160,6 +160,8 @@ recordings/
 runs/
 # Processing logs.
 logs/
+# Detection history (CSV backend).
+history/
 # Local tuning config (device/threshold differ per machine: Mac dev vs RPi prod).
 wan-pulse.toml
 # Downloaded models (fetch with scripts/download-yamnet.sh).

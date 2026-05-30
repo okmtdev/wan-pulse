@@ -17,6 +17,7 @@ import numpy as np
 from .classify import Classifier
 from .config import CaptureConfig
 from .gate import EnergyGate, Segment, rms_dbfs
+from .history import HistoryRecorder
 from .logsetup import get_logger
 from .notify import Notifier
 from .writer import SegmentWriter
@@ -35,6 +36,8 @@ class Capture:
         classify_config=None,
         notifier: Notifier | None = None,
         notify_config=None,
+        recorder: HistoryRecorder | None = None,
+        history_config=None,
         record: bool = True,
         on_segment: Callable[[Segment], None] | None = None,
         on_block: Callable[[float], None] | None = None,
@@ -46,6 +49,8 @@ class Capture:
         self._classify_config = classify_config
         self._notifier = notifier
         self._notify_config = notify_config
+        self._recorder = recorder
+        self._history_config = history_config
         self._record = record
         self._on_segment = on_segment
         self._on_block = on_block
@@ -96,11 +101,17 @@ class Capture:
                 log.info("[wan-pulse] classifying each segment%s", suffix)
             if self._notifier is not None:
                 log.info("[wan-pulse] Slack notifications enabled")
+            if self._recorder is not None:
+                backend = getattr(self._history_config, "backend", "?")
+                log.info("[wan-pulse] recording history (%s)", backend)
             # Snapshot the effective settings so this batch is reproducible.
             from .configfile import write_run_log
 
             log_path = write_run_log(
-                cfg, classify=self._classify_config, notify=self._notify_config
+                cfg,
+                classify=self._classify_config,
+                notify=self._notify_config,
+                history=self._history_config,
             )
             log.info("[wan-pulse] run settings -> %s", log_path)
 
@@ -197,6 +208,8 @@ class Capture:
         }
         self.writer.write_sidecar(wav_path, payload)
         log.info("[wan-pulse] classified %s  -> %s", wav_path.name, result.summary())
+        if self._recorder is not None:
+            self._recorder.record(result, wav_path, segment)
         if self._notifier is not None:
             self._notifier.notify(result, wav_path, segment)
         return result.summary()

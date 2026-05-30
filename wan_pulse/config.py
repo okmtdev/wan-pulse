@@ -152,3 +152,29 @@ class NotifyConfig:
             raise ValueError("cooldown_sec must be non-negative")
 
 
+@dataclass
+class HistoryConfig:
+    """Settings for the (optional) detection-history log (spreadsheet / CSV)."""
+
+    enabled: bool = False
+    """Append one row per classified segment to the history sink."""
+
+    backend: str = "gsheet"
+    """Where to write history: 'gsheet' (Google Sheets via Apps Script web app)
+    or 'csv' (a local file)."""
+
+    csv_path: str = "history/detections.csv"
+    """Output file when backend = 'csv'."""
+
+    webhook_env: str = "WAN_PULSE_SHEET_WEBHOOK"
+    """Env var holding the Apps Script web-app URL when backend = 'gsheet'."""
+
+    only_dog: bool = False
+    """If true, only log segments classified as a dog (default: log all)."""
+
+    def __post_init__(self) -> None:
+        if self.backend not in ("gsheet", "csv"):
+            raise ValueError("history backend must be 'gsheet' or 'csv'")
+
+
+
