@@ -40,6 +40,8 @@ DOG_CLASS_NAMES = frozenset(
 # Used only when ClassifyConfig.animal_detection = True.
 ANIMAL_CLASS_NAMES = frozenset({"Animal", "Domestic animals, pets"})
 
+SILENCE_LABELS = frozenset({"Silence"})
+
 
 @dataclass
 class Classification:
@@ -60,6 +62,9 @@ class Classification:
     is_animal: bool = False
     animal_label: str | None = None
     animal_score: float = 0.0
+    # Best label excluding Silence (equals top_label when that isn't Silence).
+    top_label_ns: str | None = None
+    top_score_ns: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -74,6 +79,8 @@ class Classification:
             "is_animal": self.is_animal,
             "animal_label": self.animal_label,
             "animal_score": round(self.animal_score, 4),
+            "top_label_ns": self.top_label_ns,
+            "top_score_ns": round(self.top_score_ns, 4),
             "top_k": [[name, round(score, 4)] for name, score in self.top_k],
             "backend": self.backend,
         }
@@ -86,7 +93,9 @@ class Classification:
         else:
             tag = "[not-dog]"
         emo = f" 感情:{self.emotion}" if self.emotion else ""
-        return f"{self.top_label} {self.top_score:.2f} {tag}{emo}"
+        ns = (f" →{self.top_label_ns} {self.top_score_ns:.2f}"
+              if self.top_label_ns and self.top_label_ns != self.top_label else "")
+        return f"{self.top_label} {self.top_score:.2f}{ns} {tag}{emo}"
 
 
 class Classifier(ABC):
@@ -119,6 +128,13 @@ def scores_to_classification(
             dog_label, dog_score = labels[i], float(scores[i])
             break
     is_dog = dog_score >= dog_threshold
+
+    # Best label excluding Silence.
+    top_label_ns, top_score_ns = top_label, top_score
+    for i in order:
+        if labels[i] not in SILENCE_LABELS:
+            top_label_ns, top_score_ns = labels[i], float(scores[i])
+            break
 
     # Generic animal detection (optional, off by default).
     is_animal, animal_label, animal_score = False, None, 0.0
@@ -153,6 +169,8 @@ def scores_to_classification(
         is_animal=is_animal,
         animal_label=animal_label,
         animal_score=animal_score,
+        top_label_ns=top_label_ns,
+        top_score_ns=top_score_ns,
     )
 
 

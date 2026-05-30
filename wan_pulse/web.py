@@ -29,7 +29,8 @@ log = get_logger()
 _META_KEYS = (
     "is_dog", "dog_label", "dog_score",
     "emotion", "emotion_basis", "emotion_score",
-    "top_label", "top_score", "peak_dbfs", "duration_sec", "timestamp",
+    "top_label", "top_score", "top_label_ns", "top_score_ns",
+    "peak_dbfs", "duration_sec", "timestamp",
 )
 
 
@@ -305,7 +306,7 @@ function card(s){
       <span class="revslot">${s.review?'<span class="badge rev">レビュー済</span>':''}</span>
       <span class="name">${s.name}</span></div>
     <div class="meta">peak ${num(m.peak_dbfs)}dBFS ・ ${num(m.duration_sec)}s ・
-      top: ${m.top_label||"–"} ${num(m.top_score)} ・ dog ${num(m.dog_score)} ・ ${fmtSize(s.size)}</div>
+      top: ${m.top_label||"–"} ${num(m.top_score)}${m.top_label_ns&&m.top_label_ns!==m.top_label?` → ${m.top_label_ns} ${num(m.top_score_ns)}`:""} ・ dog ${num(m.dog_score)} ・ ${fmtSize(s.size)}</div>
     <audio controls preload="none" src="/audio?path=${encodeURIComponent(s.id)}"></audio>
     <div class="review">
       <label>犬?</label>
